@@ -4,6 +4,7 @@
 
 #include <WinSock2.h>
 
+#include "capture/flow_table.h"
 #include "config/app_config.h"
 #include "logging/logger.h"
 #include "patch/patch_engine.h"
@@ -15,18 +16,19 @@ class HttpsMitmProxy;
 
 class TcpProxyServer {
 public:
-    TcpProxyServer(const AppConfig& config, Logger& logger, PatchEngine& patch_engine, ProtocolManager& protocol_manager, HttpsMitmProxy& https_mitm_proxy);
+    TcpProxyServer(const AppConfig& config, Logger& logger, PatchEngine& patch_engine, ProtocolManager& protocol_manager, HttpsMitmProxy& https_mitm_proxy, FlowTable& flow_table);
 
     void serve(std::atomic_bool& stop_requested);
 
 private:
-    void handle_client(SOCKET client_socket) const;
+    void handle_client(SOCKET client_socket, const sockaddr_in& client_endpoint) const;
 
     const AppConfig& config_;
     Logger& logger_;
     PatchEngine& patch_engine_;
     ProtocolManager& protocol_manager_;
     HttpsMitmProxy& https_mitm_proxy_;
+    FlowTable& flow_table_;
 };
 
 }  // namespace network_proxy

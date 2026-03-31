@@ -1,6 +1,6 @@
 # NetworkProxy E2E Validation Report
 
-- generated_at: 2026-04-01 02:44:56
+- generated_at: 2026-04-01 02:51:36
 - config: config/proxy_e2e.yaml
 - scope: TCP + UDP + CONNECT + certificate generation + TLS MITM plaintext patch
 

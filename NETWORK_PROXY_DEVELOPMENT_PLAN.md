@@ -390,7 +390,8 @@ rules:
 当前状态：
 
 1. 已具备 WinDivert 原型、TCP/UDP patch、HTTP patch、HTTPS MITM 和 DSL。
-2. 尚未达到“Windows 全流量透明捕获与 patch”目标。
+2. 已新增基于 WinDivert 映射表的透明目标回查转发（TCP/UDP 按客户端源端口回查原始目标，减少固定 upstream 依赖）。
+3. 尚未达到“Windows 全流量透明捕获与 patch”最终目标（仍缺 IPv6/入站/回环全量捕获与 WFP 主链路）。
 
 下一步优先级：
 

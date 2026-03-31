@@ -44,8 +44,8 @@ constexpr std::uint32_t k_loopback_ipv4_network_order = 0x0100007F;  // 127.0.0.
 
 }  // namespace
 
-WinDivertCapture::WinDivertCapture(const AppConfig& config, Logger& logger)
-    : config_(config), logger_(logger) {
+WinDivertCapture::WinDivertCapture(const AppConfig& config, Logger& logger, FlowTable& flow_table)
+    : config_(config), logger_(logger), flow_table_(flow_table) {
 }
 
 WinDivertCapture::~WinDivertCapture() {
@@ -183,10 +183,14 @@ bool WinDivertCapture::rewrite_packet_to_local_proxy(unsigned char* packet_data,
         }
 
         auto* tcp_header = reinterpret_cast<TcpHeader*>(packet_data + ihl_bytes);
+        const std::uint32_t original_destination_ip = ip_header->destination_ip;
         const std::uint16_t destination_port = ntohs(tcp_header->destination_port);
+        const std::uint16_t source_port = ntohs(tcp_header->source_port);
         if (destination_port == config_.tcp_listen_port) {
             return false;
         }
+
+        flow_table_.remember_mapping(k_protocol_tcp, ip_header->source_ip, source_port, original_destination_ip, destination_port);
 
         tcp_header->destination_port = htons(config_.tcp_listen_port);
         ip_header->destination_ip = htonl(k_loopback_ipv4_network_order);
@@ -199,10 +203,14 @@ bool WinDivertCapture::rewrite_packet_to_local_proxy(unsigned char* packet_data,
         }
 
         auto* udp_header = reinterpret_cast<UdpHeader*>(packet_data + ihl_bytes);
+        const std::uint32_t original_destination_ip = ip_header->destination_ip;
         const std::uint16_t destination_port = ntohs(udp_header->destination_port);
+        const std::uint16_t source_port = ntohs(udp_header->source_port);
         if (destination_port == config_.udp_listen_port) {
             return false;
         }
+
+        flow_table_.remember_mapping(k_protocol_udp, ip_header->source_ip, source_port, original_destination_ip, destination_port);
 
         udp_header->destination_port = htons(config_.udp_listen_port);
         ip_header->destination_ip = htonl(k_loopback_ipv4_network_order);

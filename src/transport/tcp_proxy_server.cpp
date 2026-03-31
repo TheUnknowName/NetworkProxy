@@ -86,8 +86,8 @@ std::optional<std::pair<std::string, std::uint16_t>> parse_connect_authority(std
 
 }  // namespace
 
-TcpProxyServer::TcpProxyServer(const AppConfig& config, Logger& logger, PatchEngine& patch_engine, ProtocolManager& protocol_manager, HttpsMitmProxy& https_mitm_proxy)
-    : config_(config), logger_(logger), patch_engine_(patch_engine), protocol_manager_(protocol_manager), https_mitm_proxy_(https_mitm_proxy) {
+TcpProxyServer::TcpProxyServer(const AppConfig& config, Logger& logger, PatchEngine& patch_engine, ProtocolManager& protocol_manager, HttpsMitmProxy& https_mitm_proxy, FlowTable& flow_table)
+    : config_(config), logger_(logger), patch_engine_(patch_engine), protocol_manager_(protocol_manager), https_mitm_proxy_(https_mitm_proxy), flow_table_(flow_table) {
 }
 
 void TcpProxyServer::serve(std::atomic_bool& stop_requested) {
@@ -145,8 +145,8 @@ void TcpProxyServer::serve(std::atomic_bool& stop_requested) {
             continue;
         }
 
-        client_threads.emplace_back([this, client_socket]() {
-            handle_client(client_socket);
+        client_threads.emplace_back([this, client_socket, client_endpoint]() {
+            handle_client(client_socket, client_endpoint);
         });
     }
 
@@ -159,11 +159,19 @@ void TcpProxyServer::serve(std::atomic_bool& stop_requested) {
     }
 }
 
-void TcpProxyServer::handle_client(SOCKET client_socket) const {
+void TcpProxyServer::handle_client(SOCKET client_socket, const sockaddr_in& client_endpoint) const {
     set_socket_timeout(client_socket, 1000);
 
     std::string upstream_host = config_.tcp_upstream_host;
     std::uint16_t upstream_port = config_.tcp_upstream_port;
+
+    const std::uint16_t client_source_port = ntohs(client_endpoint.sin_port);
+    const auto mapped_target = flow_table_.try_get_upstream(6, client_endpoint.sin_addr.S_un.S_addr, client_source_port);
+    if (mapped_target.has_value()) {
+        upstream_host = mapped_target->first;
+        upstream_port = mapped_target->second;
+        logger_.debug("tcp transparent target resolved: " + upstream_host + ":" + std::to_string(upstream_port));
+    }
 
     char initial_buffer[8192];
     int initial_received = recv(client_socket, initial_buffer, sizeof(initial_buffer), 0);

@@ -20,8 +20,8 @@ void close_socket_if_valid(SOCKET socket_handle) {
 
 }  // namespace
 
-UdpProxyServer::UdpProxyServer(const AppConfig& config, Logger& logger, PatchEngine& patch_engine, ProtocolManager& protocol_manager)
-    : config_(config), logger_(logger), patch_engine_(patch_engine), protocol_manager_(protocol_manager) {
+UdpProxyServer::UdpProxyServer(const AppConfig& config, Logger& logger, PatchEngine& patch_engine, ProtocolManager& protocol_manager, FlowTable& flow_table)
+    : config_(config), logger_(logger), patch_engine_(patch_engine), protocol_manager_(protocol_manager), flow_table_(flow_table) {
 }
 
 void UdpProxyServer::serve(std::atomic_bool& stop_requested) {
@@ -55,15 +55,6 @@ void UdpProxyServer::serve(std::atomic_bool& stop_requested) {
         return;
     }
 
-    sockaddr_in upstream_endpoint{};
-    if (!resolve_ipv4_endpoint(config_.udp_upstream_host, config_.udp_upstream_port, upstream_endpoint)) {
-        logger_.error("udp upstream host parse failed: " + config_.udp_upstream_host);
-        close_socket_if_valid(listen_socket);
-        close_socket_if_valid(upstream_socket);
-        stop_requested.store(true);
-        return;
-    }
-
     logger_.info("udp proxy listening on " + config_.udp_listen_host + ":" + std::to_string(config_.udp_listen_port));
 
     char buffer[65535];
@@ -82,19 +73,34 @@ void UdpProxyServer::serve(std::atomic_bool& stop_requested) {
             continue;
         }
 
+        std::string upstream_host = config_.udp_upstream_host;
+        std::uint16_t upstream_port = config_.udp_upstream_port;
+        const std::uint16_t client_source_port = ntohs(client_endpoint.sin_port);
+        const auto mapped_target = flow_table_.try_get_upstream(17, client_endpoint.sin_addr.S_un.S_addr, client_source_port);
+        if (mapped_target.has_value()) {
+            upstream_host = mapped_target->first;
+            upstream_port = mapped_target->second;
+        }
+
+        sockaddr_in upstream_endpoint{};
+        if (!resolve_ipv4_endpoint(upstream_host, upstream_port, upstream_endpoint)) {
+            logger_.warn("udp upstream host parse failed: " + upstream_host);
+            continue;
+        }
+
         std::string outbound_payload(buffer, buffer + received);
         ProtocolContext outbound_context;
         outbound_context.direction = "outbound";
         outbound_context.protocol_kind = detect_protocol_kind(outbound_payload);
-        outbound_context.host = config_.udp_upstream_host;
-        outbound_context.remote_port = config_.udp_upstream_port;
+        outbound_context.host = upstream_host;
+        outbound_context.remote_port = upstream_port;
         const bool outbound_structured = protocol_manager_.patch_payload(outbound_payload, outbound_context);
         if (!outbound_structured) {
             RuleMatchContext match_context;
             match_context.protocol = "udp";
             match_context.direction = "outbound";
-            match_context.host = config_.udp_upstream_host;
-            match_context.remote_port = config_.udp_upstream_port;
+            match_context.host = upstream_host;
+            match_context.remote_port = upstream_port;
             patch_engine_.apply_transport_patch(outbound_payload, "udp", "outbound", &match_context);
         }
 
@@ -133,15 +139,15 @@ void UdpProxyServer::serve(std::atomic_bool& stop_requested) {
         ProtocolContext inbound_context;
         inbound_context.direction = "inbound";
         inbound_context.protocol_kind = detect_protocol_kind(inbound_payload);
-        inbound_context.host = config_.udp_upstream_host;
-        inbound_context.remote_port = config_.udp_upstream_port;
+        inbound_context.host = upstream_host;
+        inbound_context.remote_port = upstream_port;
         const bool inbound_structured = protocol_manager_.patch_payload(inbound_payload, inbound_context);
         if (!inbound_structured) {
             RuleMatchContext match_context;
             match_context.protocol = "udp";
             match_context.direction = "inbound";
-            match_context.host = config_.udp_upstream_host;
-            match_context.remote_port = config_.udp_upstream_port;
+            match_context.host = upstream_host;
+            match_context.remote_port = upstream_port;
             patch_engine_.apply_transport_patch(inbound_payload, "udp", "inbound", &match_context);
         }
 

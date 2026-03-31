@@ -6,6 +6,7 @@
 #include <WinSock2.h>
 
 #include "capture/win_divert_capture.h"
+#include "capture/flow_table.h"
 #include "protocol/protocol_manager.h"
 #include "tls/https_mitm_proxy.h"
 #include "transport/tcp_proxy_server.h"
@@ -32,6 +33,7 @@ bool ProxyServer::run() {
     }
 
     std::atomic_bool stop_requested = false;
+    FlowTable flow_table;
 
     HttpsMitmProxy https_mitm_proxy(config_, logger_);
     if (!https_mitm_proxy.initialize()) {
@@ -39,7 +41,7 @@ bool ProxyServer::run() {
         return false;
     }
 
-    WinDivertCapture win_divert_capture(config_, logger_);
+    WinDivertCapture win_divert_capture(config_, logger_, flow_table);
     if (config_.capture_enabled && config_.use_windivert && !win_divert_capture.initialize()) {
         WSACleanup();
         return false;
@@ -48,8 +50,8 @@ bool ProxyServer::run() {
     ProtocolManager protocol_manager(config_, logger_, patch_engine_);
     protocol_manager.register_default_adapters();
 
-    TcpProxyServer tcp_proxy_server(config_, logger_, patch_engine_, protocol_manager, https_mitm_proxy);
-    UdpProxyServer udp_proxy_server(config_, logger_, patch_engine_, protocol_manager);
+    TcpProxyServer tcp_proxy_server(config_, logger_, patch_engine_, protocol_manager, https_mitm_proxy, flow_table);
+    UdpProxyServer udp_proxy_server(config_, logger_, patch_engine_, protocol_manager, flow_table);
 
     std::jthread capture_thread;
     if (config_.capture_enabled && config_.use_windivert && config_.max_runtime_seconds == 0) {

@@ -2,6 +2,7 @@
 
 #include <atomic>
 
+#include "capture/flow_table.h"
 #include "config/app_config.h"
 #include "logging/logger.h"
 
@@ -13,7 +14,7 @@ struct WindivertAddress {
 
 class WinDivertCapture {
 public:
-    WinDivertCapture(const AppConfig& config, Logger& logger);
+    WinDivertCapture(const AppConfig& config, Logger& logger, FlowTable& flow_table);
     ~WinDivertCapture();
 
     bool initialize();
@@ -25,6 +26,7 @@ private:
 
     const AppConfig& config_;
     Logger& logger_;
+    FlowTable& flow_table_;
     void* module_handle_ = nullptr;
     void* divert_handle_ = nullptr;
 

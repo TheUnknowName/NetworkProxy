@@ -21,7 +21,7 @@ public:
     void serve(std::atomic_bool& stop_requested);
 
 private:
-    void handle_client(SOCKET client_socket, const sockaddr_in& client_endpoint) const;
+    void handle_client(SOCKET client_socket, const sockaddr_storage& client_endpoint) const;
 
     const AppConfig& config_;
     Logger& logger_;

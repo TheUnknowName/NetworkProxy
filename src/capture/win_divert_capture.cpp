@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <string>
 #include <thread>
 
 #include <WinSock2.h>
+#include <WS2tcpip.h>
 #include <Windows.h>
 
 namespace network_proxy {
@@ -41,6 +43,18 @@ constexpr unsigned short k_windivert_layer_network = 0;
 constexpr unsigned char k_protocol_tcp = 6;
 constexpr unsigned char k_protocol_udp = 17;
 constexpr std::uint32_t k_loopback_ipv4_network_order = 0x0100007F;  // 127.0.0.1
+
+std::string ipv4_to_string(std::uint32_t ipv4_network_order) {
+    in_addr address{};
+    address.S_un.S_addr = ipv4_network_order;
+
+    char buffer[INET_ADDRSTRLEN]{};
+    if (InetNtopA(AF_INET, &address, buffer, static_cast<DWORD>(sizeof(buffer))) == nullptr) {
+        return "127.0.0.1";
+    }
+
+    return std::string(buffer);
+}
 
 }  // namespace
 
@@ -190,7 +204,7 @@ bool WinDivertCapture::rewrite_packet_to_local_proxy(unsigned char* packet_data,
             return false;
         }
 
-        flow_table_.remember_mapping(k_protocol_tcp, ip_header->source_ip, source_port, original_destination_ip, destination_port);
+        flow_table_.remember_mapping(k_protocol_tcp, ipv4_to_string(ip_header->source_ip), source_port, ipv4_to_string(original_destination_ip), destination_port);
 
         tcp_header->destination_port = htons(config_.tcp_listen_port);
         ip_header->destination_ip = htonl(k_loopback_ipv4_network_order);
@@ -210,7 +224,7 @@ bool WinDivertCapture::rewrite_packet_to_local_proxy(unsigned char* packet_data,
             return false;
         }
 
-        flow_table_.remember_mapping(k_protocol_udp, ip_header->source_ip, source_port, original_destination_ip, destination_port);
+        flow_table_.remember_mapping(k_protocol_udp, ipv4_to_string(ip_header->source_ip), source_port, ipv4_to_string(original_destination_ip), destination_port);
 
         udp_header->destination_port = htons(config_.udp_listen_port);
         ip_header->destination_ip = htonl(k_loopback_ipv4_network_order);

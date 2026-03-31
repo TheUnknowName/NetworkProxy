@@ -91,7 +91,15 @@ TcpProxyServer::TcpProxyServer(const AppConfig& config, Logger& logger, PatchEng
 }
 
 void TcpProxyServer::serve(std::atomic_bool& stop_requested) {
-    SOCKET listen_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    sockaddr_storage listen_endpoint{};
+    int listen_endpoint_length = 0;
+    if (!resolve_endpoint(config_.tcp_listen_host, config_.tcp_listen_port, listen_endpoint, listen_endpoint_length, SOCK_STREAM)) {
+        logger_.error("tcp listen host parse failed: " + config_.tcp_listen_host);
+        stop_requested.store(true);
+        return;
+    }
+
+    SOCKET listen_socket = socket(listen_endpoint.ss_family, SOCK_STREAM, IPPROTO_TCP);
     if (listen_socket == INVALID_SOCKET) {
         logger_.error("tcp listen socket create failed, error=" + describe_socket_error());
         stop_requested.store(true);
@@ -103,18 +111,15 @@ void TcpProxyServer::serve(std::atomic_bool& stop_requested) {
         logger_.warn("tcp listen socket timeout setup failed, error=" + describe_socket_error());
     }
 
-    sockaddr_in listen_endpoint{};
-    if (!resolve_ipv4_endpoint(config_.tcp_listen_host, config_.tcp_listen_port, listen_endpoint)) {
-        logger_.error("tcp listen host parse failed: " + config_.tcp_listen_host);
-        close_socket_if_valid(listen_socket);
-        stop_requested.store(true);
-        return;
+    if (listen_endpoint.ss_family == AF_INET6) {
+        const DWORD v6_only = 0;
+        setsockopt(listen_socket, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<const char*>(&v6_only), sizeof(v6_only));
     }
 
     const int reuse_address = 1;
     setsockopt(listen_socket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&reuse_address), sizeof(reuse_address));
 
-    if (bind(listen_socket, reinterpret_cast<const sockaddr*>(&listen_endpoint), sizeof(listen_endpoint)) == SOCKET_ERROR) {
+    if (bind(listen_socket, reinterpret_cast<const sockaddr*>(&listen_endpoint), listen_endpoint_length) == SOCKET_ERROR) {
         logger_.error("tcp bind failed, error=" + describe_socket_error());
         close_socket_if_valid(listen_socket);
         stop_requested.store(true);
@@ -132,7 +137,7 @@ void TcpProxyServer::serve(std::atomic_bool& stop_requested) {
 
     std::vector<std::thread> client_threads;
     while (!stop_requested.load()) {
-        sockaddr_in client_endpoint{};
+        sockaddr_storage client_endpoint{};
         int client_endpoint_length = sizeof(client_endpoint);
         SOCKET client_socket = accept(listen_socket, reinterpret_cast<sockaddr*>(&client_endpoint), &client_endpoint_length);
         if (client_socket == INVALID_SOCKET) {
@@ -159,14 +164,15 @@ void TcpProxyServer::serve(std::atomic_bool& stop_requested) {
     }
 }
 
-void TcpProxyServer::handle_client(SOCKET client_socket, const sockaddr_in& client_endpoint) const {
+void TcpProxyServer::handle_client(SOCKET client_socket, const sockaddr_storage& client_endpoint) const {
     set_socket_timeout(client_socket, 1000);
 
     std::string upstream_host = config_.tcp_upstream_host;
     std::uint16_t upstream_port = config_.tcp_upstream_port;
 
-    const std::uint16_t client_source_port = ntohs(client_endpoint.sin_port);
-    const auto mapped_target = flow_table_.try_get_upstream(6, client_endpoint.sin_addr.S_un.S_addr, client_source_port);
+    const std::string client_source_ip = endpoint_ip_to_string(reinterpret_cast<const sockaddr*>(&client_endpoint));
+    const std::uint16_t client_source_port = endpoint_port(reinterpret_cast<const sockaddr*>(&client_endpoint));
+    const auto mapped_target = flow_table_.try_get_upstream(6, client_source_ip, client_source_port);
     if (mapped_target.has_value()) {
         upstream_host = mapped_target->first;
         upstream_port = mapped_target->second;
@@ -204,7 +210,15 @@ void TcpProxyServer::handle_client(SOCKET client_socket, const sockaddr_in& clie
         return;
     }
 
-    SOCKET upstream_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    sockaddr_storage upstream_endpoint{};
+    int upstream_endpoint_length = 0;
+    if (!resolve_endpoint(upstream_host, upstream_port, upstream_endpoint, upstream_endpoint_length, SOCK_STREAM)) {
+        logger_.error("tcp upstream host parse failed: " + upstream_host);
+        close_socket_if_valid(client_socket);
+        return;
+    }
+
+    SOCKET upstream_socket = socket(upstream_endpoint.ss_family, SOCK_STREAM, IPPROTO_TCP);
     if (upstream_socket == INVALID_SOCKET) {
         logger_.error("tcp upstream socket create failed, error=" + describe_socket_error());
         close_socket_if_valid(client_socket);
@@ -213,15 +227,7 @@ void TcpProxyServer::handle_client(SOCKET client_socket, const sockaddr_in& clie
 
     set_socket_timeout(upstream_socket, 1000);
 
-    sockaddr_in upstream_endpoint{};
-    if (!resolve_ipv4_endpoint(upstream_host, upstream_port, upstream_endpoint)) {
-        logger_.error("tcp upstream host parse failed: " + upstream_host);
-        close_socket_if_valid(client_socket);
-        close_socket_if_valid(upstream_socket);
-        return;
-    }
-
-    if (connect(upstream_socket, reinterpret_cast<const sockaddr*>(&upstream_endpoint), sizeof(upstream_endpoint)) == SOCKET_ERROR) {
+    if (connect(upstream_socket, reinterpret_cast<const sockaddr*>(&upstream_endpoint), upstream_endpoint_length) == SOCKET_ERROR) {
         logger_.error("tcp upstream connect failed, error=" + describe_socket_error());
         close_socket_if_valid(client_socket);
         close_socket_if_valid(upstream_socket);

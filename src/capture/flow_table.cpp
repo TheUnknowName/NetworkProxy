@@ -1,32 +1,28 @@
 #include "capture/flow_table.h"
 
 #include <chrono>
-#include <mutex>
-#include <unordered_map>
-
-#include <WinSock2.h>
-#include <WS2tcpip.h>
+#include <functional>
 
 namespace network_proxy {
 
 std::size_t FlowTable::FlowKeyHash::operator()(const FlowKey& key) const {
     std::size_t hash_value = static_cast<std::size_t>(key.protocol);
-    hash_value ^= static_cast<std::size_t>(key.source_ip_network_order) + 0x9e3779b9 + (hash_value << 6U) + (hash_value >> 2U);
+    hash_value ^= std::hash<std::string>{}(key.source_ip) + 0x9e3779b9 + (hash_value << 6U) + (hash_value >> 2U);
     hash_value ^= static_cast<std::size_t>(key.source_port) + 0x9e3779b9 + (hash_value << 6U) + (hash_value >> 2U);
     return hash_value;
 }
 
 void FlowTable::remember_mapping(
     std::uint8_t protocol,
-    std::uint32_t source_ip_network_order,
+    const std::string& source_ip,
     std::uint16_t source_port,
-    std::uint32_t destination_ip_network_order,
+    const std::string& destination_host,
     std::uint16_t destination_port) {
     const long long now = now_millis();
 
     std::lock_guard<std::mutex> lock(mutex_);
-    FlowKey key{protocol, source_ip_network_order, source_port};
-    table_[key] = FlowEntry{destination_ip_network_order, destination_port, now};
+    FlowKey key{protocol, source_ip, source_port};
+    table_[key] = FlowEntry{destination_host, destination_port, now};
 
     if (table_.size() > 4096U) {
         prune_expired_locked(now);
@@ -35,12 +31,12 @@ void FlowTable::remember_mapping(
 
 std::optional<std::pair<std::string, std::uint16_t>> FlowTable::try_get_upstream(
     std::uint8_t protocol,
-    std::uint32_t source_ip_network_order,
+    const std::string& source_ip,
     std::uint16_t source_port) {
     const long long now = now_millis();
 
     std::lock_guard<std::mutex> lock(mutex_);
-    FlowKey key{protocol, source_ip_network_order, source_port};
+    FlowKey key{protocol, source_ip, source_port};
     const auto iterator = table_.find(key);
     if (iterator == table_.end()) {
         return std::nullopt;
@@ -52,7 +48,7 @@ std::optional<std::pair<std::string, std::uint16_t>> FlowTable::try_get_upstream
     }
 
     iterator->second.touched_millis = now;
-    return std::make_optional(std::make_pair(ipv4_to_string(iterator->second.destination_ip_network_order), iterator->second.destination_port));
+    return std::make_optional(std::make_pair(iterator->second.destination_host, iterator->second.destination_port));
 }
 
 void FlowTable::prune_expired_locked(long long now_millis_value) {
@@ -69,18 +65,6 @@ void FlowTable::prune_expired_locked(long long now_millis_value) {
 long long FlowTable::now_millis() {
     const auto now = std::chrono::steady_clock::now().time_since_epoch();
     return std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
-}
-
-std::string FlowTable::ipv4_to_string(std::uint32_t ipv4_network_order) {
-    in_addr address{};
-    address.S_un.S_addr = ipv4_network_order;
-
-    char buffer[INET_ADDRSTRLEN]{};
-    if (InetNtopA(AF_INET, &address, buffer, static_cast<DWORD>(sizeof(buffer))) == nullptr) {
-        return "127.0.0.1";
-    }
-
-    return std::string(buffer);
 }
 
 }  // namespace network_proxy

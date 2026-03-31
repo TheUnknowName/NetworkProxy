@@ -19,6 +19,7 @@ add_executable(network_proxy
     src/protocol/protocol_manager.cpp
     src/proxy/proxy_server.cpp
     src/tls/https_mitm_proxy.cpp
+    src/tls/openssl_process.cpp
     src/tls/certificate_manager.cpp
     src/transport/socket_utils.cpp
     src/transport/tcp_reassembly_buffer.cpp

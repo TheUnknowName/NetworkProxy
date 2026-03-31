@@ -39,7 +39,7 @@ bool split_http_message(std::string_view payload, std::string& head, std::string
 }
 
 std::string rebuild_headers_with_content_length(std::string_view head, std::size_t body_size) {
-    std::stringstream stream(std::string(head));
+    std::stringstream stream{std::string(head)};
     std::string line;
     std::vector<std::string> lines;
     bool has_content_length = false;

@@ -1,15 +1,57 @@
 #include "tls/https_mitm_proxy.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <string>
+#include <thread>
 
 #include "patch/patch_engine.h"
 #include "protocol/protocol_detector.h"
 #include "protocol/protocol_manager.h"
 #include "tls/certificate_manager.h"
+#include "tls/openssl_process.h"
+
+#include <WS2tcpip.h>
 
 namespace network_proxy {
+
+namespace {
+
+void close_socket_if_valid(SOCKET socket_handle) {
+    if (socket_handle != INVALID_SOCKET) {
+        closesocket(socket_handle);
+    }
+}
+
+std::string quote_argument(const std::string& value) {
+    return "\"" + value + "\"";
+}
+
+void relay_socket_stream(SOCKET source_socket, SOCKET target_socket, std::atomic_bool& stop_requested) {
+    char buffer[8192];
+    while (!stop_requested.load()) {
+        const int received = recv(source_socket, buffer, sizeof(buffer), 0);
+        if (received <= 0) {
+            break;
+        }
+
+        int sent_offset = 0;
+        while (sent_offset < received) {
+            const int sent = send(target_socket, buffer + sent_offset, received - sent_offset, 0);
+            if (sent <= 0) {
+                stop_requested.store(true);
+                return;
+            }
+            sent_offset += sent;
+        }
+    }
+
+    stop_requested.store(true);
+}
+
+}  // namespace
 
 HttpsMitmProxy::HttpsMitmProxy(const AppConfig& config, Logger& logger)
     : config_(config), logger_(logger) {
@@ -108,7 +150,7 @@ bool HttpsMitmProxy::try_extract_sni_from_client_hello(std::string_view client_h
     const std::size_t extensions_length = read_u16(data + offset);
     offset += 2;
 
-    const std::size_t extensions_end = std::min(offset + extensions_length, size);
+    const std::size_t extensions_end = (offset + extensions_length < size) ? (offset + extensions_length) : size;
     while (offset + 4 <= extensions_end) {
         const std::uint16_t extension_type = read_u16(data + offset);
         const std::size_t extension_length = read_u16(data + offset + 2);
@@ -124,7 +166,8 @@ bool HttpsMitmProxy::try_extract_sni_from_client_hello(std::string_view client_h
             }
             const std::size_t sni_list_length = read_u16(data + sni_offset);
             sni_offset += 2;
-            const std::size_t sni_end = std::min(sni_offset + sni_list_length, offset + extension_length);
+            const std::size_t extension_end = offset + extension_length;
+            const std::size_t sni_end = (sni_offset + sni_list_length < extension_end) ? (sni_offset + sni_list_length) : extension_end;
 
             while (sni_offset + 3 <= sni_end) {
                 const unsigned char name_type = data[sni_offset];
@@ -179,6 +222,164 @@ bool HttpsMitmProxy::patch_https_plaintext_http(std::string& plaintext_payload, 
     }
 
     return handled;
+}
+
+std::uint16_t HttpsMitmProxy::allocate_local_port() {
+    SOCKET probe_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (probe_socket == INVALID_SOCKET) {
+        return 0;
+    }
+
+    sockaddr_in endpoint{};
+    endpoint.sin_family = AF_INET;
+    endpoint.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    endpoint.sin_port = 0;
+
+    if (bind(probe_socket, reinterpret_cast<const sockaddr*>(&endpoint), sizeof(endpoint)) == SOCKET_ERROR) {
+        close_socket_if_valid(probe_socket);
+        return 0;
+    }
+
+    int endpoint_length = sizeof(endpoint);
+    if (getsockname(probe_socket, reinterpret_cast<sockaddr*>(&endpoint), &endpoint_length) == SOCKET_ERROR) {
+        close_socket_if_valid(probe_socket);
+        return 0;
+    }
+
+    const std::uint16_t allocated_port = ntohs(endpoint.sin_port);
+    close_socket_if_valid(probe_socket);
+    return allocated_port;
+}
+
+SOCKET HttpsMitmProxy::connect_local_port(std::uint16_t port) {
+    SOCKET socket_handle = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (socket_handle == INVALID_SOCKET) {
+        return INVALID_SOCKET;
+    }
+
+    sockaddr_in endpoint{};
+    endpoint.sin_family = AF_INET;
+    endpoint.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    endpoint.sin_port = htons(port);
+
+    for (int attempt = 0; attempt < 30; ++attempt) {
+        if (connect(socket_handle, reinterpret_cast<const sockaddr*>(&endpoint), sizeof(endpoint)) == 0) {
+            return socket_handle;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    close_socket_if_valid(socket_handle);
+    return INVALID_SOCKET;
+}
+
+bool HttpsMitmProxy::run_tls_mitm_session(SOCKET client_socket, const std::string& upstream_host, std::uint16_t upstream_port, ProtocolManager& protocol_manager, PatchEngine& patch_engine) const {
+    std::filesystem::path leaf_cert_path;
+    std::filesystem::path leaf_key_path;
+    if (!ensure_leaf_certificate_for_host(upstream_host, leaf_cert_path, leaf_key_path)) {
+        logger_.error("tls mitm leaf certificate prepare failed");
+        return false;
+    }
+
+    const std::uint16_t local_tls_port = allocate_local_port();
+    if (local_tls_port == 0) {
+        logger_.error("tls mitm allocate local port failed");
+        return false;
+    }
+
+    OpenSslProcess tls_server_process;
+    std::string process_error;
+    const std::string tls_server_command =
+        quote_argument(config_.openssl_bin_path) +
+        " s_server -quiet -accept 127.0.0.1:" + std::to_string(local_tls_port) +
+        " -cert " + quote_argument(leaf_cert_path.string()) +
+        " -key " + quote_argument(leaf_key_path.string());
+    if (!tls_server_process.start(tls_server_command, process_error)) {
+        logger_.error("start openssl s_server failed: " + process_error);
+        return false;
+    }
+
+    SOCKET tls_bridge_socket = connect_local_port(local_tls_port);
+    if (tls_bridge_socket == INVALID_SOCKET) {
+        logger_.error("connect local tls terminator failed");
+        tls_server_process.stop();
+        return false;
+    }
+
+    OpenSslProcess tls_client_process;
+    const std::string tls_client_command =
+        quote_argument(config_.openssl_bin_path) +
+        " s_client -quiet -connect " + upstream_host + ":" + std::to_string(upstream_port);
+    if (!tls_client_process.start(tls_client_command, process_error)) {
+        logger_.error("start openssl s_client failed: " + process_error);
+        close_socket_if_valid(tls_bridge_socket);
+        tls_server_process.stop();
+        return false;
+    }
+
+    std::atomic_bool stop_requested = false;
+
+    std::jthread client_to_server_thread([&]() {
+        relay_socket_stream(client_socket, tls_bridge_socket, stop_requested);
+    });
+
+    std::jthread server_to_client_thread([&]() {
+        relay_socket_stream(tls_bridge_socket, client_socket, stop_requested);
+    });
+
+    std::jthread outbound_plaintext_thread([&]() {
+        std::string read_error;
+        std::string payload;
+        while (!stop_requested.load() && tls_server_process.read_stdout(payload, read_error)) {
+            patch_https_plaintext_http(payload, "outbound", protocol_manager, patch_engine);
+
+            std::string write_error;
+            if (!tls_client_process.write_stdin(payload.data(), payload.size(), write_error)) {
+                logger_.warn("tls mitm outbound write failed: " + write_error);
+                break;
+            }
+        }
+
+        tls_client_process.close_stdin();
+        stop_requested.store(true);
+    });
+
+    std::jthread inbound_plaintext_thread([&]() {
+        std::string read_error;
+        std::string payload;
+        while (!stop_requested.load() && tls_client_process.read_stdout(payload, read_error)) {
+            patch_https_plaintext_http(payload, "inbound", protocol_manager, patch_engine);
+
+            std::string write_error;
+            if (!tls_server_process.write_stdin(payload.data(), payload.size(), write_error)) {
+                logger_.warn("tls mitm inbound write failed: " + write_error);
+                break;
+            }
+        }
+
+        tls_server_process.close_stdin();
+        stop_requested.store(true);
+    });
+
+    while (!stop_requested.load()) {
+        if (!tls_server_process.is_running() || !tls_client_process.is_running()) {
+            stop_requested.store(true);
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    shutdown(client_socket, SD_BOTH);
+    shutdown(tls_bridge_socket, SD_BOTH);
+    close_socket_if_valid(tls_bridge_socket);
+
+    tls_server_process.stop();
+    tls_client_process.stop();
+
+    logger_.info("tls mitm session ended for " + upstream_host + ":" + std::to_string(upstream_port));
+    return true;
 }
 
 }  // namespace network_proxy

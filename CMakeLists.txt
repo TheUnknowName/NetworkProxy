@@ -37,7 +37,7 @@ target_include_directories(network_proxy
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(network_proxy PRIVATE ws2_32)
+target_link_libraries(network_proxy PRIVATE ws2_32 fwpuclnt)
 
 if(MSVC)
     target_compile_options(network_proxy PRIVATE /W4 /permissive- /EHsc)

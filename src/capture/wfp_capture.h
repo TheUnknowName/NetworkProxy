@@ -2,6 +2,10 @@
 
 #include <atomic>
 
+#include <WinSock2.h>
+#include <Windows.h>
+#include <fwpmtypes.h>
+
 #include "config/app_config.h"
 #include "logging/logger.h"
 
@@ -16,14 +20,13 @@ public:
     void run(std::atomic_bool& stop_requested);
 
 private:
-    bool bind_functions();
+    static void __stdcall on_net_event(void* context, const FWPM_NET_EVENT1* net_event);
 
     const AppConfig& config_;
     Logger& logger_;
-    void* module_handle_ = nullptr;
     bool initialized_ = false;
-    void* fwpm_engine_open_ = nullptr;
-    void* fwpm_engine_close_ = nullptr;
+    void* engine_handle_ = nullptr;
+    void* subscription_handle_ = nullptr;
 };
 
 }  // namespace network_proxy

@@ -20,6 +20,7 @@ add_executable(network_proxy
     src/protocol/protocol_detector.cpp
     src/protocol/protocol_manager.cpp
     src/proxy/proxy_server.cpp
+    src/rules/rule_engine.cpp
     src/tls/https_mitm_proxy.cpp
     src/tls/openssl_process.cpp
     src/tls/certificate_manager.cpp
@@ -49,6 +50,7 @@ add_executable(network_proxy_unit_tests
     src/logging/logger.cpp
     src/patch/patch_engine.cpp
     src/protocol/protocol_detector.cpp
+    src/rules/rule_engine.cpp
     src/transport/tcp_reassembly_buffer.cpp
 )
 

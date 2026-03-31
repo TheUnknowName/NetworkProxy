@@ -30,6 +30,9 @@ struct AppConfig {
     bool protocol_adapter_enabled = true;
     bool http_adapter_enabled = true;
 
+    bool rules_enabled = true;
+    std::string rules_file_path = "config/rules.dsl";
+
     bool https_mitm_enabled = false;
     std::string https_ca_cert_path;
     std::string https_ca_key_path;

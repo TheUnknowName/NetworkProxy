@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -15,6 +16,11 @@ namespace network_proxy {
 struct ProtocolContext {
     ProtocolKind protocol_kind = ProtocolKind::Unknown;
     std::string direction;
+    std::string host;
+    std::string method;
+    std::string path;
+    std::uint16_t remote_port = 0;
+    std::string process_name;
 };
 
 class ProtocolAdapter {

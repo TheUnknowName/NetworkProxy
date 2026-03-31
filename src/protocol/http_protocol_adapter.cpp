@@ -3,6 +3,8 @@
 #include <cctype>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "protocol/http_types.h"
@@ -36,6 +38,111 @@ bool split_http_message(std::string_view payload, std::string& head, std::string
     head = std::string(payload.substr(0, delimiter_position));
     body = std::string(payload.substr(delimiter_position + 4));
     return true;
+}
+
+std::vector<std::string> split_lines(std::string_view text) {
+    std::vector<std::string> lines;
+    std::stringstream stream{std::string(text)};
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        lines.push_back(line);
+    }
+    return lines;
+}
+
+HeaderMap parse_headers(const std::vector<std::string>& lines, std::size_t start_index) {
+    HeaderMap headers;
+    for (std::size_t i = start_index; i < lines.size(); ++i) {
+        const std::string& line = lines[i];
+        const std::size_t colon_pos = line.find(':');
+        if (colon_pos == std::string::npos) {
+            continue;
+        }
+
+        std::string name = line.substr(0, colon_pos);
+        std::string value = line.substr(colon_pos + 1);
+        while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) {
+            value.erase(value.begin());
+        }
+        headers[name] = value;
+    }
+
+    return headers;
+}
+
+std::string get_header_value(const HeaderMap& headers, const std::string& name) {
+    for (const auto& [header_name, header_value] : headers) {
+        if (starts_with_ignore_case(header_name, name)) {
+            return header_value;
+        }
+    }
+
+    return "";
+}
+
+bool parse_request_start_line(const std::string& line, HttpRequest& request) {
+    const std::size_t first_space = line.find(' ');
+    if (first_space == std::string::npos) {
+        return false;
+    }
+
+    const std::size_t second_space = line.find(' ', first_space + 1);
+    if (second_space == std::string::npos) {
+        return false;
+    }
+
+    request.method = line.substr(0, first_space);
+    request.target = line.substr(first_space + 1, second_space - first_space - 1);
+    return true;
+}
+
+bool parse_response_start_line(const std::string& line, HttpResponse& response) {
+    const std::size_t first_space = line.find(' ');
+    if (first_space == std::string::npos) {
+        return false;
+    }
+
+    const std::size_t second_space = line.find(' ', first_space + 1);
+    const std::string status_part = second_space == std::string::npos ? line.substr(first_space + 1) : line.substr(first_space + 1, second_space - first_space - 1);
+    try {
+        response.status_code = static_cast<std::uint16_t>(std::stoul(status_part));
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+RuleMatchContext build_rule_context(const ProtocolContext& context, const HttpRequest* request, const HeaderMap& headers) {
+    RuleMatchContext match_context;
+    match_context.direction = context.direction;
+    match_context.remote_port = context.remote_port;
+    match_context.process_name = context.process_name;
+    match_context.path = context.path;
+
+    if (context.protocol_kind == ProtocolKind::Http) {
+        match_context.protocol = "http";
+    } else if (context.protocol_kind == ProtocolKind::Https) {
+        match_context.protocol = "https";
+    } else {
+        match_context.protocol = "unknown";
+    }
+
+    if (request != nullptr) {
+        match_context.method = request->method;
+        if (!request->target.empty()) {
+            match_context.path = request->target;
+        }
+    }
+
+    match_context.host = context.host;
+    if (match_context.host.empty()) {
+        match_context.host = get_header_value(headers, "Host");
+    }
+
+    return match_context;
 }
 
 std::string rebuild_headers_with_content_length(std::string_view head, std::size_t body_size) {
@@ -90,19 +197,32 @@ bool HttpProtocolAdapter::apply_patch(std::string& payload, const ProtocolContex
     }
 
     bool changed = false;
-    if (starts_with_ignore_case(head, "HTTP/")) {
+    const std::vector<std::string> lines = split_lines(head);
+    if (lines.empty()) {
+        return false;
+    }
+
+    if (starts_with_ignore_case(lines[0], "HTTP/")) {
         HttpResponse response;
+        parse_response_start_line(lines[0], response);
+        response.headers = parse_headers(lines, 1);
         response.body = body;
-        patch_engine.apply_response_patch(response);
-        if (response.body != body) {
+        const RuleMatchContext match_context = build_rule_context(context, nullptr, response.headers);
+        const bool patched = patch_engine.apply_response_patch(response, &match_context);
+        if (patched) {
             body = response.body;
             changed = true;
         }
     } else {
         HttpRequest request;
+        if (!parse_request_start_line(lines[0], request)) {
+            return false;
+        }
+        request.headers = parse_headers(lines, 1);
         request.body = body;
-        patch_engine.apply_request_patch(request);
-        if (request.body != body) {
+        const RuleMatchContext match_context = build_rule_context(context, &request, request.headers);
+        const bool patched = patch_engine.apply_request_patch(request, &match_context);
+        if (patched) {
             body = request.body;
             changed = true;
         }

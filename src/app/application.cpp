@@ -8,6 +8,7 @@
 #include "logging/logger.h"
 #include "patch/patch_engine.h"
 #include "proxy/proxy_server.h"
+#include "rules/rule_engine.h"
 #include "tls/certificate_manager.h"
 
 namespace network_proxy {
@@ -88,6 +89,18 @@ int Application::run(int argc, char* argv[]) {
     }
 
     PatchEngine patch_engine(config, logger);
+    RuleEngine rule_engine;
+    if (config.rules_enabled) {
+        std::string rule_error;
+        if (!rule_engine.load_from_file(config.rules_file_path, rule_error)) {
+            logger.error("load rules failed: " + rule_error);
+            return 1;
+        }
+
+        patch_engine.set_rule_engine(&rule_engine);
+        logger.info("rule engine loaded, rule_count=" + std::to_string(rule_engine.rule_count()));
+    }
+
     ProxyServer proxy_server(config, logger, patch_engine);
 
     if (!proxy_server.run()) {

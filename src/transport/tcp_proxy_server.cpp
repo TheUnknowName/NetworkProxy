@@ -243,7 +243,7 @@ void TcpProxyServer::handle_client(SOCKET client_socket) const {
         force_https_plaintext_patch = config_.https_plaintext_test_mode;
     }
 
-    auto pump = [this, force_https_plaintext_patch](SOCKET source_socket, SOCKET target_socket, const std::string& direction, std::string first_payload) {
+    auto pump = [this, force_https_plaintext_patch, upstream_host, upstream_port](SOCKET source_socket, SOCKET target_socket, const std::string& direction, std::string first_payload) {
         TcpReassemblyBuffer reassembly_buffer;
         bool protocol_decided = false;
         ProtocolKind protocol_kind = ProtocolKind::Unknown;
@@ -257,10 +257,17 @@ void TcpProxyServer::handle_client(SOCKET client_socket) const {
             ProtocolContext context;
             context.direction = direction;
             context.protocol_kind = protocol_kind;
+            context.host = upstream_host;
+            context.remote_port = upstream_port;
 
             const bool structured_patched = protocol_manager_.patch_payload(payload, context);
             if (!structured_patched) {
-                patch_engine_.apply_transport_patch(payload, "tcp", direction);
+                RuleMatchContext match_context;
+                match_context.protocol = "tcp";
+                match_context.direction = direction;
+                match_context.host = upstream_host;
+                match_context.remote_port = upstream_port;
+                patch_engine_.apply_transport_patch(payload, "tcp", direction, &match_context);
             }
 
             return send_all(target_socket, payload.data(), static_cast<int>(payload.size()));

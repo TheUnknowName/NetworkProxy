@@ -86,9 +86,16 @@ void UdpProxyServer::serve(std::atomic_bool& stop_requested) {
         ProtocolContext outbound_context;
         outbound_context.direction = "outbound";
         outbound_context.protocol_kind = detect_protocol_kind(outbound_payload);
+        outbound_context.host = config_.udp_upstream_host;
+        outbound_context.remote_port = config_.udp_upstream_port;
         const bool outbound_structured = protocol_manager_.patch_payload(outbound_payload, outbound_context);
         if (!outbound_structured) {
-            patch_engine_.apply_transport_patch(outbound_payload, "udp", "outbound");
+            RuleMatchContext match_context;
+            match_context.protocol = "udp";
+            match_context.direction = "outbound";
+            match_context.host = config_.udp_upstream_host;
+            match_context.remote_port = config_.udp_upstream_port;
+            patch_engine_.apply_transport_patch(outbound_payload, "udp", "outbound", &match_context);
         }
 
         const int upstream_sent = sendto(
@@ -126,9 +133,16 @@ void UdpProxyServer::serve(std::atomic_bool& stop_requested) {
         ProtocolContext inbound_context;
         inbound_context.direction = "inbound";
         inbound_context.protocol_kind = detect_protocol_kind(inbound_payload);
+        inbound_context.host = config_.udp_upstream_host;
+        inbound_context.remote_port = config_.udp_upstream_port;
         const bool inbound_structured = protocol_manager_.patch_payload(inbound_payload, inbound_context);
         if (!inbound_structured) {
-            patch_engine_.apply_transport_patch(inbound_payload, "udp", "inbound");
+            RuleMatchContext match_context;
+            match_context.protocol = "udp";
+            match_context.direction = "inbound";
+            match_context.host = config_.udp_upstream_host;
+            match_context.remote_port = config_.udp_upstream_port;
+            patch_engine_.apply_transport_patch(inbound_payload, "udp", "inbound", &match_context);
         }
 
         const int client_sent = sendto(

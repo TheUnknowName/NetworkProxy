@@ -9,32 +9,73 @@ PatchEngine::PatchEngine(const AppConfig& config, Logger& logger)
     : config_(config), logger_(logger) {
 }
 
-void PatchEngine::apply_request_patch(HttpRequest& request) const {
+void PatchEngine::set_rule_engine(const RuleEngine* rule_engine) {
+    rule_engine_ = rule_engine;
+}
+
+bool PatchEngine::apply_request_patch(HttpRequest& request, const RuleMatchContext* context) const {
+    bool changed = false;
+
+    if (rule_engine_ != nullptr && context != nullptr) {
+        changed |= rule_engine_->apply_http_request(request, *context);
+    }
+
     if (config_.add_proxy_header) {
-        request.headers["X-Network-Proxy"] = "network_proxy";
+        const auto existing = request.headers.find("X-Network-Proxy");
+        if (existing == request.headers.end() || existing->second != "network_proxy") {
+            request.headers["X-Network-Proxy"] = "network_proxy";
+            changed = true;
+        }
     }
 
     if (config_.append_debug_suffix && !request.body.empty()) {
         request.body += "\n[patched-by-network-proxy-request]";
+        changed = true;
     }
 
     logger_.debug("request patch applied");
+    return changed;
 }
 
-void PatchEngine::apply_response_patch(HttpResponse& response) const {
+bool PatchEngine::apply_response_patch(HttpResponse& response, const RuleMatchContext* context) const {
+    bool changed = false;
+
+    if (rule_engine_ != nullptr && context != nullptr) {
+        changed |= rule_engine_->apply_http_response(response, *context);
+    }
+
     if (config_.add_proxy_header) {
-        response.headers["X-Network-Proxy"] = "network_proxy";
+        const auto existing = response.headers.find("X-Network-Proxy");
+        if (existing == response.headers.end() || existing->second != "network_proxy") {
+            response.headers["X-Network-Proxy"] = "network_proxy";
+            changed = true;
+        }
     }
 
     if (config_.append_debug_suffix && !response.body.empty()) {
         response.body += "\n[patched-by-network-proxy-response]";
+        changed = true;
     }
 
     logger_.debug("response patch applied");
+    return changed;
 }
 
-bool PatchEngine::apply_transport_patch(std::string& payload, std::string_view protocol, std::string_view direction) const {
+bool PatchEngine::apply_transport_patch(std::string& payload, std::string_view protocol, std::string_view direction, const RuleMatchContext* context) const {
     const bool is_outbound = direction == "outbound";
+    bool changed = false;
+
+    RuleMatchContext local_context;
+    if (context != nullptr) {
+        local_context = *context;
+    }
+    local_context.protocol = std::string(protocol);
+    local_context.direction = std::string(direction);
+
+    if (rule_engine_ != nullptr) {
+        changed |= rule_engine_->apply_transport(payload, local_context);
+    }
+
     std::size_t total_replace_count = 0;
 
     if (config_.enable_text_patch) {
@@ -58,7 +99,7 @@ bool PatchEngine::apply_transport_patch(std::string& payload, std::string_view p
     }
 
     if (total_replace_count == 0) {
-        return false;
+        return changed;
     }
 
     logger_.info(std::string(protocol) + " " + std::string(direction) + " patch applied, replacements=" + std::to_string(total_replace_count));

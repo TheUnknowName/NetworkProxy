@@ -209,6 +209,19 @@ bool AppConfig::load_from_file(const std::filesystem::path& config_path, std::st
             continue;
         }
 
+        if (full_key == "rules.enabled") {
+            if (!parse_bool(value, rules_enabled)) {
+                error_message = "invalid rules.enabled at line " + std::to_string(line_number);
+                return false;
+            }
+            continue;
+        }
+
+        if (full_key == "rules.file") {
+            rules_file_path = value;
+            continue;
+        }
+
         if (full_key == "https_mitm.enabled") {
             if (!parse_bool(value, https_mitm_enabled)) {
                 error_message = "invalid https_mitm.enabled at line " + std::to_string(line_number);

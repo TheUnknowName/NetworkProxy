@@ -887,13 +887,13 @@ dry-run 模式建议只记录将要修改的内容，但不真正改写，便于
 5. WinDivert 动态加载与基础重定向逻辑。
 6. CA 安装/卸载与动态叶子证书签发接口。
 7. CONNECT 链路接入真实 TLS MITM 数据面（客户端 TLS 终止 + 上游 TLS 重建，依赖本机 OpenSSL）。
+8. 规则 DSL（`config/rules.dsl`）已落地，支持按协议、方向、Host、Method、Path、端口匹配并执行文本/十六进制/body/header 补丁。
 
 未完全实现：
 
-1. 规则系统仍是轻量配置驱动，尚未实现完整规则 DSL（按 Host/Path/Method/进程的统一规则树）。
-2. 未引入 HTTP/2、WebSocket 深度处理、WFP 增强路径。
-3. 尚未形成长期稳定性压测与性能基准报告。
-4. QUIC/HTTP3、DTLS 等 UDP 加密协议仍按旁路/未知协议处理。
+1. 未引入 HTTP/2、WebSocket 深度处理、WFP 增强路径。
+2. 尚未形成长期稳定性压测与性能基准报告。
+3. QUIC/HTTP3、DTLS 等 UDP 加密协议仍按旁路/未知协议处理。
 
 本次补充：
 

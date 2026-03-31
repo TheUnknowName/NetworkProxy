@@ -248,7 +248,7 @@ void TcpProxyServer::handle_client(SOCKET client_socket) const {
         bool protocol_decided = false;
         ProtocolKind protocol_kind = ProtocolKind::Unknown;
 
-        auto patch_and_send = [this, &direction, &protocol_kind, force_https_plaintext_patch, target_socket](std::string payload) {
+        auto patch_and_send = [this, &direction, &protocol_kind, force_https_plaintext_patch, target_socket, upstream_host, upstream_port](std::string payload) {
             if (force_https_plaintext_patch) {
                 https_mitm_proxy_.patch_https_plaintext_http(payload, direction, protocol_manager_, patch_engine_);
                 return send_all(target_socket, payload.data(), static_cast<int>(payload.size()));

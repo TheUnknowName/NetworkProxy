@@ -18,9 +18,17 @@ New-Item -ItemType Directory -Force -Path $temp_dir | Out-Null
 New-Item -ItemType Directory -Force -Path $cache_dir | Out-Null
 
 $openssl_cmd = Get-Command openssl -ErrorAction SilentlyContinue
-$openssl_available = $null -ne $openssl_cmd
+$openssl_bin_path = if ($null -ne $openssl_cmd) { $openssl_cmd.Source } else { "" }
+if ([string]::IsNullOrWhiteSpace($openssl_bin_path)) {
+    $fallback_openssl = "C:\Program Files\OpenSSL-Win64\bin\openssl.exe"
+    if (Test-Path $fallback_openssl) {
+        $openssl_bin_path = $fallback_openssl
+    }
+}
+
+$openssl_available = -not [string]::IsNullOrWhiteSpace($openssl_bin_path)
 $https_enabled = if ($openssl_available) { "true" } else { "false" }
-$openssl_bin = if ($openssl_available) { "openssl" } else { "openssl-not-found" }
+$openssl_bin = if ($openssl_available) { $openssl_bin_path } else { "openssl-not-found" }
 
 $root_ca_crt = Join-Path $ca_dir "root_ca.crt"
 $root_ca_key = Join-Path $ca_dir "root_ca.key"
@@ -29,9 +37,9 @@ $upstream_key = Join-Path $temp_dir "packet_upstream.key"
 $upstream_pfx = Join-Path $temp_dir "packet_upstream.pfx"
 
 if ($openssl_available) {
-    & openssl req -x509 -newkey rsa:2048 -nodes -keyout $root_ca_key -out $root_ca_crt -subj "/CN=NetworkProxy Local CA" -days 2 | Out-Null
-    & openssl req -x509 -newkey rsa:2048 -nodes -keyout $upstream_key -out $upstream_crt -subj "/CN=127.0.0.1" -days 2 | Out-Null
-    & openssl pkcs12 -export -out $upstream_pfx -inkey $upstream_key -in $upstream_crt -passout pass: | Out-Null
+    & $openssl_bin_path req -x509 -newkey rsa:2048 -nodes -keyout $root_ca_key -out $root_ca_crt -subj "/CN=NetworkProxy Local CA" -days 2 | Out-Null
+    & $openssl_bin_path req -x509 -newkey rsa:2048 -nodes -keyout $upstream_key -out $upstream_crt -subj "/CN=127.0.0.1" -days 2 | Out-Null
+    & $openssl_bin_path pkcs12 -export -out $upstream_pfx -inkey $upstream_key -in $upstream_crt -passout pass: | Out-Null
 }
 
 @"

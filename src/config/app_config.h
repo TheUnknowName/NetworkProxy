@@ -8,8 +8,10 @@ namespace network_proxy {
 
 struct AppConfig {
     bool capture_enabled = false;
+    bool use_wfp = false;
     bool use_windivert = false;
-    std::string windivert_filter = "outbound and (tcp or udp)";
+    std::string wfp_filter = "ip and (tcp or udp)";
+    std::string windivert_filter = "ip and (tcp or udp)";
 
     bool tcp_enabled = true;
     std::string tcp_listen_host = "127.0.0.1";

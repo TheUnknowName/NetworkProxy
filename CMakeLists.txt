@@ -12,6 +12,7 @@ add_executable(network_proxy
     src/main.cpp
     src/app/application.cpp
     src/capture/flow_table.cpp
+    src/capture/wfp_capture.cpp
     src/capture/win_divert_capture.cpp
     src/common/string_utils.cpp
     src/config/app_config.cpp

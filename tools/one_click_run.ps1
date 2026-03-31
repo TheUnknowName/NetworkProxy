@@ -10,15 +10,19 @@ New-Item -ItemType Directory -Force -Path $report_dir | Out-Null
 
 Write-Output "[1/5] Configure CMake"
 cmake -S . -B build
+if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
 
 Write-Output "[2/5] Build Debug"
 cmake --build build --config Debug
+if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
 
 Write-Output "[3/5] Run CTest (Debug)"
 ctest --test-dir build -C Debug --output-on-failure
+if ($LASTEXITCODE -ne 0) { throw "ctest failed" }
 
 Write-Output "[4/5] Run E2E Validation"
 powershell -ExecutionPolicy Bypass -File (Join-Path $repo_root "tools\e2e_clean_validation.ps1")
+if ($LASTEXITCODE -ne 0) { throw "e2e validation failed" }
 
 Write-Output "[5/5] Build summary report"
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"

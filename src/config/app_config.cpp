@@ -99,6 +99,19 @@ bool AppConfig::load_from_file(const std::filesystem::path& config_path, std::st
             continue;
         }
 
+        if (full_key == "capture.use_wfp") {
+            if (!parse_bool(value, use_wfp)) {
+                error_message = "invalid capture.use_wfp at line " + std::to_string(line_number);
+                return false;
+            }
+            continue;
+        }
+
+        if (full_key == "capture.wfp_filter") {
+            wfp_filter = value;
+            continue;
+        }
+
         if (full_key == "capture.windivert_filter") {
             windivert_filter = value;
             continue;

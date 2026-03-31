@@ -391,7 +391,9 @@ rules:
 
 1. 已具备 WinDivert 原型、TCP/UDP patch、HTTP patch、HTTPS MITM 和 DSL。
 2. 已新增基于 WinDivert 映射表的透明目标回查转发（TCP/UDP 按客户端源端口回查原始目标，减少固定 upstream 依赖）。
-3. 尚未达到“Windows 全流量透明捕获与 patch”最终目标（仍缺 IPv6/入站/回环全量捕获与 WFP 主链路）。
+3. 已补充 IPv6 传输寻址与 WinDivert IPv6 TCP/UDP 重写记录能力，默认过滤器切换为双向 IP TCP/UDP 捕获。
+4. 已接入 WFP Capture 适配器骨架与运行时回退策略（优先 WFP，失败自动回退 WinDivert）。
+5. 尚未达到“Windows 全流量透明捕获与 patch”最终目标（WFP 数据面仍处于 scaffold 阶段，仍需完成真实拦截重定向与更完备的入站/回环策略验证）。
 
 下一步优先级：
 

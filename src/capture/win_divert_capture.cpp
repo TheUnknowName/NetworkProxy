@@ -1,8 +1,10 @@
 #include "capture/win_divert_capture.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <thread>
 
@@ -37,12 +39,22 @@ struct UdpHeader {
     std::uint16_t source_port;
     std::uint16_t destination_port;
 };
+
+struct Ipv6Header {
+    std::uint8_t version_tc_fl[4];
+    std::uint16_t payload_length;
+    std::uint8_t next_header;
+    std::uint8_t hop_limit;
+    std::uint8_t source_address[16];
+    std::uint8_t destination_address[16];
+};
 #pragma pack(pop)
 
 constexpr unsigned short k_windivert_layer_network = 0;
 constexpr unsigned char k_protocol_tcp = 6;
 constexpr unsigned char k_protocol_udp = 17;
 constexpr std::uint32_t k_loopback_ipv4_network_order = 0x0100007F;  // 127.0.0.1
+constexpr std::array<std::uint8_t, 16> k_loopback_ipv6 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
 
 std::string ipv4_to_string(std::uint32_t ipv4_network_order) {
     in_addr address{};
@@ -51,6 +63,19 @@ std::string ipv4_to_string(std::uint32_t ipv4_network_order) {
     char buffer[INET_ADDRSTRLEN]{};
     if (InetNtopA(AF_INET, &address, buffer, static_cast<DWORD>(sizeof(buffer))) == nullptr) {
         return "127.0.0.1";
+    }
+
+    return std::string(buffer);
+}
+
+std::string ipv6_to_string(const std::uint8_t* ipv6_address) {
+    if (ipv6_address == nullptr) {
+        return "::1";
+    }
+
+    char buffer[INET6_ADDRSTRLEN]{};
+    if (InetNtopA(AF_INET6, ipv6_address, buffer, static_cast<DWORD>(sizeof(buffer))) == nullptr) {
+        return "::1";
     }
 
     return std::string(buffer);
@@ -175,60 +200,122 @@ bool WinDivertCapture::bind_functions() {
 }
 
 bool WinDivertCapture::rewrite_packet_to_local_proxy(unsigned char* packet_data, unsigned int packet_length) const {
-    if (packet_data == nullptr || packet_length < sizeof(Ipv4Header)) {
+    if (packet_data == nullptr || packet_length < 1U) {
         return false;
     }
 
-    auto* ip_header = reinterpret_cast<Ipv4Header*>(packet_data);
-    const std::uint8_t version = static_cast<std::uint8_t>((ip_header->version_ihl >> 4U) & 0x0F);
-    const std::size_t ihl_bytes = static_cast<std::size_t>(ip_header->version_ihl & 0x0F) * 4U;
+    const std::uint8_t version = static_cast<std::uint8_t>((packet_data[0] >> 4U) & 0x0F);
 
-    if (version != 4 || ihl_bytes < sizeof(Ipv4Header) || packet_length < ihl_bytes) {
+    if (version == 4) {
+        if (packet_length < sizeof(Ipv4Header)) {
+            return false;
+        }
+
+        auto* ip_header = reinterpret_cast<Ipv4Header*>(packet_data);
+        const std::size_t ihl_bytes = static_cast<std::size_t>(ip_header->version_ihl & 0x0F) * 4U;
+
+        if (ihl_bytes < sizeof(Ipv4Header) || packet_length < ihl_bytes) {
+            return false;
+        }
+
+        if (ip_header->destination_ip == htonl(k_loopback_ipv4_network_order)) {
+            return false;
+        }
+
+        if (ip_header->protocol == k_protocol_tcp) {
+            if (!config_.tcp_enabled || packet_length < ihl_bytes + sizeof(TcpHeader)) {
+                return false;
+            }
+
+            auto* tcp_header = reinterpret_cast<TcpHeader*>(packet_data + ihl_bytes);
+            const std::uint32_t original_destination_ip = ip_header->destination_ip;
+            const std::uint16_t destination_port = ntohs(tcp_header->destination_port);
+            const std::uint16_t source_port = ntohs(tcp_header->source_port);
+            if (destination_port == config_.tcp_listen_port) {
+                return false;
+            }
+
+            flow_table_.remember_mapping(k_protocol_tcp, ipv4_to_string(ip_header->source_ip), source_port, ipv4_to_string(original_destination_ip), destination_port);
+
+            tcp_header->destination_port = htons(config_.tcp_listen_port);
+            ip_header->destination_ip = htonl(k_loopback_ipv4_network_order);
+            return true;
+        }
+
+        if (ip_header->protocol == k_protocol_udp) {
+            if (!config_.udp_enabled || packet_length < ihl_bytes + sizeof(UdpHeader)) {
+                return false;
+            }
+
+            auto* udp_header = reinterpret_cast<UdpHeader*>(packet_data + ihl_bytes);
+            const std::uint32_t original_destination_ip = ip_header->destination_ip;
+            const std::uint16_t destination_port = ntohs(udp_header->destination_port);
+            const std::uint16_t source_port = ntohs(udp_header->source_port);
+            if (destination_port == config_.udp_listen_port) {
+                return false;
+            }
+
+            flow_table_.remember_mapping(k_protocol_udp, ipv4_to_string(ip_header->source_ip), source_port, ipv4_to_string(original_destination_ip), destination_port);
+
+            udp_header->destination_port = htons(config_.udp_listen_port);
+            ip_header->destination_ip = htonl(k_loopback_ipv4_network_order);
+            return true;
+        }
+
         return false;
     }
 
-    if (ip_header->destination_ip == htonl(k_loopback_ipv4_network_order)) {
+    if (version == 6) {
+        if (packet_length < sizeof(Ipv6Header)) {
+            return false;
+        }
+
+        auto* ipv6_header = reinterpret_cast<Ipv6Header*>(packet_data);
+        const bool is_loopback_destination = std::memcmp(ipv6_header->destination_address, k_loopback_ipv6.data(), k_loopback_ipv6.size()) == 0;
+        if (is_loopback_destination) {
+            return false;
+        }
+
+        const std::size_t header_size = sizeof(Ipv6Header);
+        if (ipv6_header->next_header == k_protocol_tcp) {
+            if (!config_.tcp_enabled || packet_length < header_size + sizeof(TcpHeader)) {
+                return false;
+            }
+
+            auto* tcp_header = reinterpret_cast<TcpHeader*>(packet_data + header_size);
+            const std::uint16_t destination_port = ntohs(tcp_header->destination_port);
+            const std::uint16_t source_port = ntohs(tcp_header->source_port);
+            if (destination_port == config_.tcp_listen_port) {
+                return false;
+            }
+
+            flow_table_.remember_mapping(k_protocol_tcp, ipv6_to_string(ipv6_header->source_address), source_port, ipv6_to_string(ipv6_header->destination_address), destination_port);
+
+            tcp_header->destination_port = htons(config_.tcp_listen_port);
+            std::memcpy(ipv6_header->destination_address, k_loopback_ipv6.data(), k_loopback_ipv6.size());
+            return true;
+        }
+
+        if (ipv6_header->next_header == k_protocol_udp) {
+            if (!config_.udp_enabled || packet_length < header_size + sizeof(UdpHeader)) {
+                return false;
+            }
+
+            auto* udp_header = reinterpret_cast<UdpHeader*>(packet_data + header_size);
+            const std::uint16_t destination_port = ntohs(udp_header->destination_port);
+            const std::uint16_t source_port = ntohs(udp_header->source_port);
+            if (destination_port == config_.udp_listen_port) {
+                return false;
+            }
+
+            flow_table_.remember_mapping(k_protocol_udp, ipv6_to_string(ipv6_header->source_address), source_port, ipv6_to_string(ipv6_header->destination_address), destination_port);
+
+            udp_header->destination_port = htons(config_.udp_listen_port);
+            std::memcpy(ipv6_header->destination_address, k_loopback_ipv6.data(), k_loopback_ipv6.size());
+            return true;
+        }
+
         return false;
-    }
-
-    if (ip_header->protocol == k_protocol_tcp) {
-        if (!config_.tcp_enabled || packet_length < ihl_bytes + sizeof(TcpHeader)) {
-            return false;
-        }
-
-        auto* tcp_header = reinterpret_cast<TcpHeader*>(packet_data + ihl_bytes);
-        const std::uint32_t original_destination_ip = ip_header->destination_ip;
-        const std::uint16_t destination_port = ntohs(tcp_header->destination_port);
-        const std::uint16_t source_port = ntohs(tcp_header->source_port);
-        if (destination_port == config_.tcp_listen_port) {
-            return false;
-        }
-
-        flow_table_.remember_mapping(k_protocol_tcp, ipv4_to_string(ip_header->source_ip), source_port, ipv4_to_string(original_destination_ip), destination_port);
-
-        tcp_header->destination_port = htons(config_.tcp_listen_port);
-        ip_header->destination_ip = htonl(k_loopback_ipv4_network_order);
-        return true;
-    }
-
-    if (ip_header->protocol == k_protocol_udp) {
-        if (!config_.udp_enabled || packet_length < ihl_bytes + sizeof(UdpHeader)) {
-            return false;
-        }
-
-        auto* udp_header = reinterpret_cast<UdpHeader*>(packet_data + ihl_bytes);
-        const std::uint32_t original_destination_ip = ip_header->destination_ip;
-        const std::uint16_t destination_port = ntohs(udp_header->destination_port);
-        const std::uint16_t source_port = ntohs(udp_header->source_port);
-        if (destination_port == config_.udp_listen_port) {
-            return false;
-        }
-
-        flow_table_.remember_mapping(k_protocol_udp, ipv4_to_string(ip_header->source_ip), source_port, ipv4_to_string(original_destination_ip), destination_port);
-
-        udp_header->destination_port = htons(config_.udp_listen_port);
-        ip_header->destination_ip = htonl(k_loopback_ipv4_network_order);
-        return true;
     }
 
     return false;

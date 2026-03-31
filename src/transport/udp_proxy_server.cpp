@@ -34,17 +34,21 @@ void UdpProxyServer::serve(std::atomic_bool& stop_requested) {
     }
 
     SOCKET listen_socket = socket(listen_endpoint.ss_family, SOCK_DGRAM, IPPROTO_UDP);
-    SOCKET upstream_socket = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
-    if (listen_socket == INVALID_SOCKET || upstream_socket == INVALID_SOCKET) {
+    SOCKET upstream_socket_v4 = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    SOCKET upstream_socket_v6 = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
+    if (listen_socket == INVALID_SOCKET || upstream_socket_v4 == INVALID_SOCKET) {
         logger_.error("udp socket create failed, error=" + describe_socket_error());
         close_socket_if_valid(listen_socket);
-        close_socket_if_valid(upstream_socket);
+        close_socket_if_valid(upstream_socket_v4);
+        close_socket_if_valid(upstream_socket_v6);
         stop_requested.store(true);
         return;
     }
 
-    const DWORD upstream_v6_only = 0;
-    setsockopt(upstream_socket, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<const char*>(&upstream_v6_only), sizeof(upstream_v6_only));
+    if (upstream_socket_v6 != INVALID_SOCKET) {
+        const DWORD upstream_v6_only = 1;
+        setsockopt(upstream_socket_v6, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<const char*>(&upstream_v6_only), sizeof(upstream_v6_only));
+    }
 
     if (listen_endpoint.ss_family == AF_INET6) {
         const DWORD listen_v6_only = 0;
@@ -52,12 +56,16 @@ void UdpProxyServer::serve(std::atomic_bool& stop_requested) {
     }
 
     set_socket_timeout(listen_socket, 500);
-    set_socket_timeout(upstream_socket, 1000);
+    set_socket_timeout(upstream_socket_v4, 1000);
+    if (upstream_socket_v6 != INVALID_SOCKET) {
+        set_socket_timeout(upstream_socket_v6, 1000);
+    }
 
     if (bind(listen_socket, reinterpret_cast<const sockaddr*>(&listen_endpoint), listen_endpoint_length) == SOCKET_ERROR) {
         logger_.error("udp bind failed, error=" + describe_socket_error());
         close_socket_if_valid(listen_socket);
-        close_socket_if_valid(upstream_socket);
+        close_socket_if_valid(upstream_socket_v4);
+        close_socket_if_valid(upstream_socket_v6);
         stop_requested.store(true);
         return;
     }
@@ -113,8 +121,14 @@ void UdpProxyServer::serve(std::atomic_bool& stop_requested) {
             patch_engine_.apply_transport_patch(outbound_payload, "udp", "outbound", &match_context);
         }
 
+        const SOCKET active_upstream_socket = (upstream_endpoint.ss_family == AF_INET6) ? upstream_socket_v6 : upstream_socket_v4;
+        if (active_upstream_socket == INVALID_SOCKET) {
+            logger_.warn("udp sendto upstream failed, error=no ipv6 upstream socket");
+            continue;
+        }
+
         const int upstream_sent = sendto(
-            upstream_socket,
+            active_upstream_socket,
             outbound_payload.data(),
             static_cast<int>(outbound_payload.size()),
             0,
@@ -129,7 +143,7 @@ void UdpProxyServer::serve(std::atomic_bool& stop_requested) {
         sockaddr_storage upstream_sender{};
         int upstream_sender_length = sizeof(upstream_sender);
         const int upstream_received = recvfrom(
-            upstream_socket,
+            active_upstream_socket,
             upstream_buffer,
             sizeof(upstream_buffer),
             0,
@@ -174,7 +188,8 @@ void UdpProxyServer::serve(std::atomic_bool& stop_requested) {
     }
 
     close_socket_if_valid(listen_socket);
-    close_socket_if_valid(upstream_socket);
+    close_socket_if_valid(upstream_socket_v4);
+    close_socket_if_valid(upstream_socket_v6);
 }
 
 }  // namespace network_proxy

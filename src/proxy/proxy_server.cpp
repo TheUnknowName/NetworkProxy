@@ -7,6 +7,7 @@
 
 #include "capture/win_divert_capture.h"
 #include "capture/flow_table.h"
+#include "capture/wfp_capture.h"
 #include "protocol/protocol_manager.h"
 #include "tls/https_mitm_proxy.h"
 #include "transport/tcp_proxy_server.h"
@@ -34,6 +35,12 @@ bool ProxyServer::run() {
 
     std::atomic_bool stop_requested = false;
     FlowTable flow_table;
+    enum class CaptureBackend {
+        None,
+        Wfp,
+        WinDivert
+    };
+    CaptureBackend active_capture_backend = CaptureBackend::None;
 
     HttpsMitmProxy https_mitm_proxy(config_, logger_);
     if (!https_mitm_proxy.initialize()) {
@@ -41,10 +48,28 @@ bool ProxyServer::run() {
         return false;
     }
 
+    WfpCapture wfp_capture(config_, logger_);
     WinDivertCapture win_divert_capture(config_, logger_, flow_table);
-    if (config_.capture_enabled && config_.use_windivert && !win_divert_capture.initialize()) {
-        WSACleanup();
-        return false;
+    if (config_.capture_enabled) {
+        if (config_.use_wfp) {
+            if (wfp_capture.initialize()) {
+                active_capture_backend = CaptureBackend::Wfp;
+            } else {
+                logger_.warn("wfp capture init failed, fallback to windivert if enabled");
+            }
+        }
+
+        if (active_capture_backend == CaptureBackend::None && config_.use_windivert) {
+            if (!win_divert_capture.initialize()) {
+                WSACleanup();
+                return false;
+            }
+            active_capture_backend = CaptureBackend::WinDivert;
+        }
+
+        if (active_capture_backend == CaptureBackend::None) {
+            logger_.warn("capture.enabled=true but no capture backend is active");
+        }
     }
 
     ProtocolManager protocol_manager(config_, logger_, patch_engine_);
@@ -54,12 +79,14 @@ bool ProxyServer::run() {
     UdpProxyServer udp_proxy_server(config_, logger_, patch_engine_, protocol_manager, flow_table);
 
     std::jthread capture_thread;
-    if (config_.capture_enabled && config_.use_windivert && config_.max_runtime_seconds == 0) {
+    if (active_capture_backend == CaptureBackend::Wfp) {
+        capture_thread = std::jthread([&]() {
+            wfp_capture.run(stop_requested);
+        });
+    } else if (active_capture_backend == CaptureBackend::WinDivert) {
         capture_thread = std::jthread([&]() {
             win_divert_capture.run(stop_requested);
         });
-    } else if (config_.capture_enabled && config_.use_windivert && config_.max_runtime_seconds > 0) {
-        logger_.warn("windivert capture is disabled in timed-run mode to avoid blocking shutdown");
     }
 
     std::jthread tcp_thread;

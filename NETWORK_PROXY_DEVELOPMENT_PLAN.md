@@ -397,3 +397,29 @@ rules:
 1. 先完成透明转发重构，去除固定上游依赖。
 2. 扩展捕获到 IPv6、入站与回环。
 3. 再接入 WFP 主链路，完成全量覆盖目标。
+
+## 16. 一键执行入口
+
+为支持“读取需求后一键执行到底”，已提供总控脚本：
+
+1. tools/one_click_run.ps1
+
+执行内容：
+
+1. cmake 配置
+2. Debug 构建
+3. CTest 全链路执行（unit_tests、smoke_tests、packet_smoke_tests、e2e_validation）
+4. E2E 独立复验
+5. 生成汇总报告
+
+执行命令：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\one_click_run.ps1
+```
+
+输出报告：
+
+1. reports/packet_smoke_report.md
+2. reports/e2e_validation_report.md
+3. reports/one_click_summary.md

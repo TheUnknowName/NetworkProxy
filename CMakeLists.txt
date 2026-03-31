@@ -74,3 +74,7 @@ add_test(
     NAME packet_smoke_tests
     COMMAND powershell -ExecutionPolicy Bypass -File ${CMAKE_CURRENT_SOURCE_DIR}/tools/packet_smoke_test.ps1
 )
+add_test(
+    NAME e2e_validation
+    COMMAND powershell -ExecutionPolicy Bypass -File ${CMAKE_CURRENT_SOURCE_DIR}/tools/e2e_clean_validation.ps1
+)

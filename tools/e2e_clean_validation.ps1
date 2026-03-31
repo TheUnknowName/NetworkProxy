@@ -259,3 +259,15 @@ Write-Output "E2E report generated: $report_path"
 foreach ($key in $results.Keys) {
     Write-Output "$key => $($results[$key])"
 }
+
+$has_fail = $false
+foreach ($key in $results.Keys) {
+    if ($results[$key].StartsWith("FAIL")) {
+        $has_fail = $true
+        break
+    }
+}
+
+if ($has_fail) {
+    throw "e2e validation failed"
+}

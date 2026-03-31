@@ -1,0 +1,11 @@
+listen:
+  host: 127.0.0.1
+  port: 18080
+
+runtime:
+  log_level: info
+  dry_run: true
+
+patch:
+  add_proxy_header: true
+  append_debug_suffix: true

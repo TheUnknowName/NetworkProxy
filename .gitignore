@@ -1,0 +1,51 @@
+# Build directories
+/build/
+/out/
+/bin/
+/obj/
+
+# CMake
+/CMakeFiles/
+/CMakeCache.txt
+/cmake_install.cmake
+/compile_commands.json
+/CTestTestfile.cmake
+/Testing/
+/install_manifest.txt
+/Makefile
+
+# Visual Studio
+/.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.VC.db
+*.VC.opendb
+*.ipch
+*.pdb
+*.ilk
+*.idb
+
+# VS Code workspace settings
+/.vscode/
+!/.vscode/
+/.vscode/*
+!/.vscode/settings.json
+!/.vscode/tasks.json
+!/.vscode/launch.json
+!/.vscode/c_cpp_properties.json
+
+# Common temporary files
+*.log
+*.tmp
+*.temp
+*.cache
+*.user
+*.opendb
+
+# Application binaries and libraries
+*.exe
+*.dll
+*.lib
+*.exp

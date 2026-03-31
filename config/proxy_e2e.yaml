@@ -26,18 +26,14 @@ protocol:
   enabled: true
   http_enabled: true
 
-rules:
-  enabled: true
-  file: config/rules.dsl
-
 https_mitm:
-  enabled: false
+    enabled: true
   ca_cert_path: cert/ca/root_ca.crt
   ca_key_path: cert/ca/root_ca.key
   ca_subject_name: NetworkProxy Local CA
   install_to_current_user: false
   cert_cache_dir: cert/cache
-  openssl_bin_path: openssl-not-found
+    openssl_bin_path: C:\Program Files\OpenSSL-Win64\bin\openssl.exe
   plaintext_test_mode: false
 
 patch:

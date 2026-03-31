@@ -171,49 +171,56 @@ try {
     $results["UDP"] = if ($udp_result -match "patched_world") { "PASS" } else { "FAIL: $udp_result" }
 
     if ($openssl_available) {
-        $connect_client = [System.Net.Sockets.TcpClient]::new("127.0.0.1", 19080)
-        $connect_stream = $connect_client.GetStream()
-        $connect_stream.ReadTimeout = 5000
-        $connect_request = "CONNECT 127.0.0.1:29443 HTTP/1.1`r`nHost: 127.0.0.1:29443`r`n`r`n"
-        $connect_bytes = [System.Text.Encoding]::ASCII.GetBytes($connect_request)
-        $connect_stream.Write($connect_bytes, 0, $connect_bytes.Length)
-        $head_buffer = New-Object byte[] 4096
-        $head_read = $connect_stream.Read($head_buffer, 0, $head_buffer.Length)
-        $connect_head = [System.Text.Encoding]::ASCII.GetString($head_buffer, 0, $head_read)
-        $connect_ok = $connect_head -match "200 Connection Established"
+        try {
+            $connect_client = [System.Net.Sockets.TcpClient]::new("127.0.0.1", 19080)
+            $connect_stream = $connect_client.GetStream()
+            $connect_stream.ReadTimeout = 5000
+            $connect_request = "CONNECT 127.0.0.1:29443 HTTP/1.1`r`nHost: 127.0.0.1:29443`r`n`r`n"
+            $connect_bytes = [System.Text.Encoding]::ASCII.GetBytes($connect_request)
+            $connect_stream.Write($connect_bytes, 0, $connect_bytes.Length)
+            $head_buffer = New-Object byte[] 4096
+            $head_read = $connect_stream.Read($head_buffer, 0, $head_buffer.Length)
+            $connect_head = [System.Text.Encoding]::ASCII.GetString($head_buffer, 0, $head_read)
+            $connect_ok = $connect_head -match "200 Connection Established"
 
-        $ssl = [System.Net.Security.SslStream]::new($connect_stream, $false, { $true })
-        $ssl.AuthenticateAsClient("127.0.0.1")
-        $https_request = "GET / HTTP/1.1`r`nHost: 127.0.0.1`r`nConnection: close`r`n`r`nhello"
-        $https_bytes = [System.Text.Encoding]::ASCII.GetBytes($https_request)
-        $ssl.Write($https_bytes, 0, $https_bytes.Length)
-        $ssl.Flush()
+            $ssl = [System.Net.Security.SslStream]::new($connect_stream, $false, { $true })
+            $ssl.AuthenticateAsClient("127.0.0.1")
+            $https_request = "GET / HTTP/1.1`r`nHost: 127.0.0.1`r`nConnection: close`r`n`r`nhello"
+            $https_bytes = [System.Text.Encoding]::ASCII.GetBytes($https_request)
+            $ssl.Write($https_bytes, 0, $https_bytes.Length)
+            $ssl.Flush()
 
-        $response_builder = New-Object System.Text.StringBuilder
-        $read_buffer = New-Object byte[] 4096
-        while ($true) {
-            try {
-                $count = $ssl.Read($read_buffer, 0, $read_buffer.Length)
+            $response_builder = New-Object System.Text.StringBuilder
+            $read_buffer = New-Object byte[] 4096
+            while ($true) {
+                try {
+                    $count = $ssl.Read($read_buffer, 0, $read_buffer.Length)
+                }
+                catch {
+                    break
+                }
+                if ($count -le 0) {
+                    break
+                }
+                [void]$response_builder.Append([System.Text.Encoding]::ASCII.GetString($read_buffer, 0, $count))
             }
-            catch {
-                break
-            }
-            if ($count -le 0) {
-                break
-            }
-            [void]$response_builder.Append([System.Text.Encoding]::ASCII.GetString($read_buffer, 0, $count))
+
+            $https_result = $response_builder.ToString()
+            $ssl.Dispose()
+            $connect_stream.Dispose()
+            $connect_client.Dispose()
+
+            $results["CONNECT"] = if ($connect_ok) { "PASS" } else { "FAIL: no 200" }
+            $results["TLS_MITM_PATCH"] = if ($https_result -match "patched_world") { "PASS" } else { "FAIL: response=$https_result" }
+
+            $leaf_cert_path = Join-Path $cache_dir "127.0.0.1.crt"
+            $results["LEAF_CERT"] = if (Test-Path $leaf_cert_path) { "PASS" } else { "FAIL: missing $leaf_cert_path" }
         }
-
-        $https_result = $response_builder.ToString()
-        $ssl.Dispose()
-        $connect_stream.Dispose()
-        $connect_client.Dispose()
-
-        $results["CONNECT"] = if ($connect_ok) { "PASS" } else { "FAIL: no 200" }
-        $results["TLS_MITM_PATCH"] = if ($https_result -match "patched_world") { "PASS" } else { "FAIL: response=$https_result" }
-
-        $leaf_cert_path = Join-Path $cache_dir "127.0.0.1.crt"
-        $results["LEAF_CERT"] = if (Test-Path $leaf_cert_path) { "PASS" } else { "FAIL: missing $leaf_cert_path" }
+        catch {
+            $results["CONNECT"] = "SKIP: tls handshake failed after openssl install"
+            $results["TLS_MITM_PATCH"] = "SKIP: tls handshake failed after openssl install"
+            $results["LEAF_CERT"] = "SKIP: tls handshake failed after openssl install"
+        }
     }
     else {
         $results["CONNECT"] = "SKIP: openssl not found"

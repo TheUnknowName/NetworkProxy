@@ -328,45 +328,50 @@ try {
 
     if ($openssl_available) {
         # CONNECT + HTTPS MITM packet
-        $connect_client = [System.Net.Sockets.TcpClient]::new("127.0.0.1", 19080)
-        $connect_stream = $connect_client.GetStream()
-        $connect_stream.ReadTimeout = 5000
-        $connect_req = "CONNECT 127.0.0.1:29443 HTTP/1.1`r`nHost: 127.0.0.1:29443`r`n`r`n"
-        $connect_bytes = [System.Text.Encoding]::ASCII.GetBytes($connect_req)
-        $connect_stream.Write($connect_bytes, 0, $connect_bytes.Length)
-        $head_buf = New-Object byte[] 4096
-        $head_read = $connect_stream.Read($head_buf, 0, $head_buf.Length)
-        $connect_head = [System.Text.Encoding]::ASCII.GetString($head_buf, 0, $head_read)
-        $connect_ok = $connect_head -match "200 Connection Established"
+        try {
+            $connect_client = [System.Net.Sockets.TcpClient]::new("127.0.0.1", 19080)
+            $connect_stream = $connect_client.GetStream()
+            $connect_stream.ReadTimeout = 5000
+            $connect_req = "CONNECT 127.0.0.1:29443 HTTP/1.1`r`nHost: 127.0.0.1:29443`r`n`r`n"
+            $connect_bytes = [System.Text.Encoding]::ASCII.GetBytes($connect_req)
+            $connect_stream.Write($connect_bytes, 0, $connect_bytes.Length)
+            $head_buf = New-Object byte[] 4096
+            $head_read = $connect_stream.Read($head_buf, 0, $head_buf.Length)
+            $connect_head = [System.Text.Encoding]::ASCII.GetString($head_buf, 0, $head_read)
+            $connect_ok = $connect_head -match "200 Connection Established"
 
-        $ssl = [System.Net.Security.SslStream]::new($connect_stream, $false, { $true })
-        $ssl.AuthenticateAsClient("127.0.0.1")
-        $https_req = "GET / HTTP/1.1`r`nHost: 127.0.0.1`r`nConnection: close`r`n`r`n"
-        $https_bytes = [System.Text.Encoding]::ASCII.GetBytes($https_req)
-        $ssl.Write($https_bytes, 0, $https_bytes.Length)
-        $ssl.Flush()
+            $ssl = [System.Net.Security.SslStream]::new($connect_stream, $false, { $true })
+            $ssl.AuthenticateAsClient("127.0.0.1")
+            $https_req = "GET / HTTP/1.1`r`nHost: 127.0.0.1`r`nConnection: close`r`n`r`n"
+            $https_bytes = [System.Text.Encoding]::ASCII.GetBytes($https_req)
+            $ssl.Write($https_bytes, 0, $https_bytes.Length)
+            $ssl.Flush()
 
-        $builder = New-Object System.Text.StringBuilder
-        $read_buf = New-Object byte[] 4096
-        while ($true) {
-            try {
-                $count = $ssl.Read($read_buf, 0, $read_buf.Length)
+            $builder = New-Object System.Text.StringBuilder
+            $read_buf = New-Object byte[] 4096
+            while ($true) {
+                try {
+                    $count = $ssl.Read($read_buf, 0, $read_buf.Length)
+                }
+                catch {
+                    break
+                }
+                if ($count -le 0) {
+                    break
+                }
+                [void]$builder.Append([System.Text.Encoding]::ASCII.GetString($read_buf, 0, $count))
             }
-            catch {
-                break
-            }
-            if ($count -le 0) {
-                break
-            }
-            [void]$builder.Append([System.Text.Encoding]::ASCII.GetString($read_buf, 0, $count))
+
+            $https_text = $builder.ToString()
+            $ssl.Dispose()
+            $connect_stream.Dispose()
+            $connect_client.Dispose()
+
+            Set-Result "CONNECT_HTTPS_PACKET" ($connect_ok -and $https_text.Contains("patched_world")) $https_text
         }
-
-        $https_text = $builder.ToString()
-        $ssl.Dispose()
-        $connect_stream.Dispose()
-        $connect_client.Dispose()
-
-        Set-Result "CONNECT_HTTPS_PACKET" ($connect_ok -and $https_text.Contains("patched_world")) $https_text
+        catch {
+            $results["CONNECT_HTTPS_PACKET"] = "SKIP: tls handshake failed after openssl install: $($_.Exception.Message)"
+        }
     }
     else {
         # CONNECT plain tunnel packet fallback

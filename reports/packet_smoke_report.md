@@ -1,6 +1,6 @@
 # Packet Protocol Smoke Report
 
-- generated_at: 2026-04-01 02:14:32
+- generated_at: 2026-04-01 02:29:21
 - scope: tcp-text, tcp-binary-unknown, udp-text, http, connect, https-mitm(if openssl)
 
 ## Results
@@ -8,4 +8,4 @@
 - TCP_BINARY_UNKNOWN: PASS
 - UDP_TEXT: PASS
 - HTTP_PACKET: PASS
-- CONNECT_TUNNEL_PACKET: PASS
+- CONNECT_HTTPS_PACKET: SKIP: tls handshake failed after openssl install: ???1???????AuthenticateAsClient??????:?????????????: ???????????????????

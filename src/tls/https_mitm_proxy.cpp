@@ -292,9 +292,10 @@ bool HttpsMitmProxy::run_tls_mitm_session(SOCKET client_socket, const std::strin
     std::string process_error;
     const std::string tls_server_command =
         quote_argument(config_.openssl_bin_path) +
-        " s_server -quiet -accept 127.0.0.1:" + std::to_string(local_tls_port) +
+        " s_server -quiet -accept " + std::to_string(local_tls_port) +
         " -cert " + quote_argument(leaf_cert_path.string()) +
-        " -key " + quote_argument(leaf_key_path.string());
+        " -key " + quote_argument(leaf_key_path.string()) +
+        " -servername 127.0.0.1";
     if (!tls_server_process.start(tls_server_command, process_error)) {
         logger_.error("start openssl s_server failed: " + process_error);
         return false;
@@ -310,7 +311,8 @@ bool HttpsMitmProxy::run_tls_mitm_session(SOCKET client_socket, const std::strin
     OpenSslProcess tls_client_process;
     const std::string tls_client_command =
         quote_argument(config_.openssl_bin_path) +
-        " s_client -quiet -connect " + upstream_host + ":" + std::to_string(upstream_port);
+        " s_client -quiet -connect " + upstream_host + ":" + std::to_string(upstream_port) +
+        " -servername " + upstream_host;
     if (!tls_client_process.start(tls_client_command, process_error)) {
         logger_.error("start openssl s_client failed: " + process_error);
         close_socket_if_valid(tls_bridge_socket);

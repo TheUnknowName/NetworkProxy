@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+enable_testing()
+
 add_executable(network_proxy
     src/main.cpp
     src/app/application.cpp
@@ -39,3 +41,30 @@ if(MSVC)
 else()
     target_compile_options(network_proxy PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+add_executable(network_proxy_unit_tests
+    tests/unit_tests.cpp
+    src/common/string_utils.cpp
+    src/config/app_config.cpp
+    src/logging/logger.cpp
+    src/patch/patch_engine.cpp
+    src/protocol/protocol_detector.cpp
+    src/transport/tcp_reassembly_buffer.cpp
+)
+
+target_include_directories(network_proxy_unit_tests
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+if(MSVC)
+    target_compile_options(network_proxy_unit_tests PRIVATE /W4 /permissive- /EHsc)
+else()
+    target_compile_options(network_proxy_unit_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME unit_tests COMMAND network_proxy_unit_tests)
+add_test(
+    NAME smoke_tests
+    COMMAND powershell -ExecutionPolicy Bypass -File ${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke_test.ps1
+)

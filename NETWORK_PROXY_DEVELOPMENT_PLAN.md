@@ -875,3 +875,27 @@ dry-run 模式建议只记录将要修改的内容，但不真正改写，便于
 3. 协议检测器接口
 4. HTTP 适配器接口
 5. WinDivert 流量导入模块
+
+## 20. 当前实现状态审计（2026-04-01）
+
+已实现：
+
+1. CMake 工程与命令行可执行程序。
+2. TCP 双向转发与字节级 patch。
+3. UDP 双向转发与报文级 patch。
+4. 协议检测（HTTP/HTTPS/Unknown）与 HTTP 结构化 patch（含 Content-Length 重建）。
+5. WinDivert 动态加载与基础重定向逻辑。
+6. CA 安装/卸载与动态叶子证书签发接口。
+7. CONNECT 链路接入真实 TLS MITM 数据面（客户端 TLS 终止 + 上游 TLS 重建，依赖本机 OpenSSL）。
+
+未完全实现：
+
+1. 规则系统仍是轻量配置驱动，尚未实现完整规则 DSL（按 Host/Path/Method/进程的统一规则树）。
+2. 未引入 HTTP/2、WebSocket 深度处理、WFP 增强路径。
+3. 尚未形成长期稳定性压测与性能基准报告。
+4. QUIC/HTTP3、DTLS 等 UDP 加密协议仍按旁路/未知协议处理。
+
+本次补充：
+
+1. 新增单元测试目标与测试用例。
+2. 新增可重复执行的冒烟测试脚本与 CTest 集成入口。

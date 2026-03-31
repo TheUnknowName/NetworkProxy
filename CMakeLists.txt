@@ -70,3 +70,7 @@ add_test(
     NAME smoke_tests
     COMMAND powershell -ExecutionPolicy Bypass -File ${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke_test.ps1
 )
+add_test(
+    NAME packet_smoke_tests
+    COMMAND powershell -ExecutionPolicy Bypass -File ${CMAKE_CURRENT_SOURCE_DIR}/tools/packet_smoke_test.ps1
+)

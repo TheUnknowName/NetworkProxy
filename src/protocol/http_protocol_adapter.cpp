@@ -179,6 +179,28 @@ std::string rebuild_headers_with_content_length(std::string_view head, std::size
     return rebuilt;
 }
 
+std::string rebuild_head_from_model(const std::string& start_line, const HeaderMap& headers, std::size_t body_size) {
+    std::string rebuilt = start_line;
+    rebuilt += "\r\n";
+
+    bool has_content_length = false;
+    for (const auto& [name, value] : headers) {
+        if (starts_with_ignore_case(name, "Content-Length")) {
+            rebuilt += "Content-Length: " + std::to_string(body_size) + "\r\n";
+            has_content_length = true;
+            continue;
+        }
+
+        rebuilt += name + ": " + value + "\r\n";
+    }
+
+    if (!has_content_length) {
+        rebuilt += "Content-Length: " + std::to_string(body_size) + "\r\n";
+    }
+
+    return rebuilt;
+}
+
 }  // namespace
 
 bool HttpProtocolAdapter::can_handle(const ProtocolContext& context, std::string_view payload) const {
@@ -210,6 +232,7 @@ bool HttpProtocolAdapter::apply_patch(std::string& payload, const ProtocolContex
         const RuleMatchContext match_context = build_rule_context(context, nullptr, response.headers);
         const bool patched = patch_engine.apply_response_patch(response, &match_context);
         if (patched) {
+            head = rebuild_head_from_model(lines[0], response.headers, response.body.size());
             body = response.body;
             changed = true;
         }
@@ -223,6 +246,7 @@ bool HttpProtocolAdapter::apply_patch(std::string& payload, const ProtocolContex
         const RuleMatchContext match_context = build_rule_context(context, &request, request.headers);
         const bool patched = patch_engine.apply_request_patch(request, &match_context);
         if (patched) {
+            head = rebuild_head_from_model(lines[0], request.headers, request.body.size());
             body = request.body;
             changed = true;
         }

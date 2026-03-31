@@ -1,0 +1,55 @@
+capture:
+  enabled: false
+  use_windivert: false
+  windivert_filter: outbound and (tcp or udp)
+
+tcp:
+  enabled: true
+  listen_host: 127.0.0.1
+  listen_port: 19080
+  upstream_host: 127.0.0.1
+  upstream_port: 29080
+
+udp:
+  enabled: true
+  listen_host: 127.0.0.1
+  listen_port: 19081
+  upstream_host: 127.0.0.1
+  upstream_port: 29081
+
+runtime:
+  log_level: info
+  dry_run: false
+  max_runtime_seconds: 40
+
+protocol:
+  enabled: true
+  http_enabled: true
+
+rules:
+  enabled: true
+  file: config/rules_packet_smoke.dsl
+
+https_mitm:
+  enabled: false
+  ca_cert_path: cert/ca/root_ca.crt
+  ca_key_path: cert/ca/root_ca.key
+  ca_subject_name: NetworkProxy Local CA
+  install_to_current_user: false
+  cert_cache_dir: cert/cache
+  openssl_bin_path: openssl-not-found
+  plaintext_test_mode: false
+
+patch:
+  enable_text_patch: false
+  enable_hex_patch: false
+  add_proxy_header: false
+  append_debug_suffix: false
+  outbound_find: ""
+  outbound_replace: ""
+  inbound_find: ""
+  inbound_replace: ""
+  outbound_find_hex: ""
+  outbound_replace_hex: ""
+  inbound_find_hex: ""
+  inbound_replace_hex: ""

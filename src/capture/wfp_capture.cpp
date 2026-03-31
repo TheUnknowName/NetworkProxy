@@ -45,7 +45,7 @@ std::string endpoint_to_text_v6(const FWP_BYTE_ARRAY16* address, std::uint16_t p
 }  // namespace
 
 WfpCapture::WfpCapture(const AppConfig& config, Logger& logger)
-    : config_(config), logger_(logger) {
+    : config_(config), logger_(logger), redirect_controller_(std::make_unique<WfpRedirectController>(config, logger)) {
 }
 
 WfpCapture::~WfpCapture() {
@@ -97,6 +97,19 @@ bool WfpCapture::initialize() {
         return false;
     }
 
+    if (config_.wfp_redirect_enabled) {
+        if (!redirect_controller_->initialize()) {
+            fallback_reason_ = redirect_controller_->fallback_reason();
+            if (config_.wfp_redirect_allow_startup_fallback) {
+                fallback_requested_.store(true);
+                logger_.warn("wfp redirect init failed, startup fallback allowed");
+            } else {
+                logger_.error("wfp redirect init failed and startup fallback disabled");
+                return false;
+            }
+        }
+    }
+
     initialized_ = true;
     logger_.info("wfp capture adapter initialized with net-event subscription");
     return true;
@@ -109,9 +122,33 @@ void WfpCapture::run(std::atomic_bool& stop_requested) {
 
     logger_.info("wfp capture loop started");
     while (!stop_requested.load()) {
+        if (config_.wfp_redirect_enabled && !fallback_requested_.load()) {
+            redirect_controller_->tick_health();
+            if (redirect_controller_->fallback_requested()) {
+                fallback_reason_ = redirect_controller_->fallback_reason();
+                if (config_.wfp_redirect_allow_runtime_fallback) {
+                    fallback_requested_.store(true);
+                    logger_.warn("wfp redirect requested runtime fallback: " + fallback_reason_);
+                    break;
+                }
+
+                logger_.error("wfp redirect unhealthy and runtime fallback disabled");
+                stop_requested.store(true);
+                break;
+            }
+        }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
     logger_.info("wfp capture loop stopped");
+}
+
+bool WfpCapture::fallback_requested() const {
+    return fallback_requested_.load();
+}
+
+std::string WfpCapture::fallback_reason() const {
+    return fallback_reason_;
 }
 
 void __stdcall WfpCapture::on_net_event(void* context, const FWPM_NET_EVENT1* net_event) {

@@ -6,21 +6,21 @@ capture:
 tcp:
   enabled: true
   listen_host: 127.0.0.1
-  listen_port: 18080
+  listen_port: 19080
   upstream_host: 127.0.0.1
-  upstream_port: 28080
+  upstream_port: 29080
 
 udp:
   enabled: true
   listen_host: 127.0.0.1
-  listen_port: 18081
+  listen_port: 19081
   upstream_host: 127.0.0.1
-  upstream_port: 28081
+  upstream_port: 29081
 
 runtime:
-  log_level: info
-  dry_run: true
-  max_runtime_seconds: 0
+  log_level: debug
+  dry_run: false
+  max_runtime_seconds: 60
 
 protocol:
   enabled: true
@@ -34,13 +34,13 @@ https_mitm:
   install_to_current_user: true
   cert_cache_dir: cert/cache
   openssl_bin_path: openssl
-  plaintext_test_mode: false
+  plaintext_test_mode: true
 
 patch:
   enable_text_patch: true
   enable_hex_patch: false
   add_proxy_header: true
-  append_debug_suffix: true
+  append_debug_suffix: false
   outbound_find: hello
   outbound_replace: patched_hello
   inbound_find: world

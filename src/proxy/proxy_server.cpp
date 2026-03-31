@@ -1,8 +1,15 @@
 #include "proxy/proxy_server.h"
 
-#include <string>
+#include <chrono>
+#include <thread>
 
-#include "protocol/http_types.h"
+#include <WinSock2.h>
+
+#include "capture/win_divert_capture.h"
+#include "protocol/protocol_manager.h"
+#include "tls/https_mitm_proxy.h"
+#include "transport/tcp_proxy_server.h"
+#include "transport/udp_proxy_server.h"
 
 namespace network_proxy {
 
@@ -12,32 +19,86 @@ ProxyServer::ProxyServer(const AppConfig& config, Logger& logger, PatchEngine& p
 
 bool ProxyServer::run() {
     logger_.info("proxy server bootstrap start");
-    logger_.info("listen endpoint: " + config_.listen_host + ":" + std::to_string(config_.listen_port));
-
-    HttpRequest request;
-    request.method = "POST";
-    request.target = "/api/demo";
-    request.headers["Content-Type"] = "application/json";
-    request.body = R"({"message":"hello"})";
-
-    patch_engine_.apply_request_patch(request);
-    logger_.info("patched request body: " + request.body);
-
-    HttpResponse response;
-    response.status_code = 200;
-    response.headers["Content-Type"] = "application/json";
-    response.body = R"({"status":"ok"})";
-
-    patch_engine_.apply_response_patch(response);
-    logger_.info("patched response body: " + response.body);
+    logger_.info("tcp enabled: " + std::string(config_.tcp_enabled ? "true" : "false"));
+    logger_.info("udp enabled: " + std::string(config_.udp_enabled ? "true" : "false"));
 
     if (config_.dry_run) {
         logger_.warn("dry_run enabled, network capture and forwarding are not started yet");
         return true;
     }
 
-    logger_.warn("real proxy loop is not implemented yet");
+    if (!initialize_winsock()) {
+        return false;
+    }
+
+    std::atomic_bool stop_requested = false;
+
+    HttpsMitmProxy https_mitm_proxy(config_, logger_);
+    if (!https_mitm_proxy.initialize()) {
+        WSACleanup();
+        return false;
+    }
+
+    WinDivertCapture win_divert_capture(config_, logger_);
+    if (config_.capture_enabled && config_.use_windivert && !win_divert_capture.initialize()) {
+        WSACleanup();
+        return false;
+    }
+
+    ProtocolManager protocol_manager(config_, logger_, patch_engine_);
+    protocol_manager.register_default_adapters();
+
+    TcpProxyServer tcp_proxy_server(config_, logger_, patch_engine_, protocol_manager, https_mitm_proxy);
+    UdpProxyServer udp_proxy_server(config_, logger_, patch_engine_, protocol_manager);
+
+    std::jthread capture_thread;
+    if (config_.capture_enabled && config_.use_windivert && config_.max_runtime_seconds == 0) {
+        capture_thread = std::jthread([&]() {
+            win_divert_capture.run(stop_requested);
+        });
+    } else if (config_.capture_enabled && config_.use_windivert && config_.max_runtime_seconds > 0) {
+        logger_.warn("windivert capture is disabled in timed-run mode to avoid blocking shutdown");
+    }
+
+    std::jthread tcp_thread;
+    if (config_.tcp_enabled) {
+        tcp_thread = std::jthread([&]() {
+            tcp_proxy_server.serve(stop_requested);
+        });
+    }
+
+    std::jthread udp_thread;
+    if (config_.udp_enabled) {
+        udp_thread = std::jthread([&]() {
+            udp_proxy_server.serve(stop_requested);
+        });
+    }
+
+    if (config_.max_runtime_seconds == 0) {
+        logger_.info("proxy server running, press Ctrl+C to stop");
+        while (!stop_requested.load()) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    } else {
+        logger_.info("proxy server running for " + std::to_string(config_.max_runtime_seconds) + " seconds");
+        std::this_thread::sleep_for(std::chrono::seconds(config_.max_runtime_seconds));
+        stop_requested.store(true);
+    }
+
+    WSACleanup();
+    return true;
+}
+
+bool ProxyServer::initialize_winsock() const {
+    WSADATA wsa_data{};
+    const int startup_result = WSAStartup(MAKEWORD(2, 2), &wsa_data);
+    if (startup_result != 0) {
+        logger_.error("WSAStartup failed, error=" + std::to_string(startup_result));
+        return false;
+    }
+
     return true;
 }
 
 }  // namespace network_proxy
+

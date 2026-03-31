@@ -11,6 +11,11 @@ struct AppConfig {
     bool use_wfp = false;
     bool use_windivert = false;
     std::string wfp_filter = "ip and (tcp or udp)";
+    bool wfp_redirect_enabled = false;
+    bool wfp_redirect_allow_startup_fallback = true;
+    bool wfp_redirect_allow_runtime_fallback = true;
+    std::string wfp_callout_channel = "local://network_proxy_callout";
+    std::string wfp_redirect_filter = "ip and (tcp or udp)";
     std::string windivert_filter = "ip and (tcp or udp)";
 
     bool tcp_enabled = true;

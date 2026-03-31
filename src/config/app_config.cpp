@@ -112,6 +112,40 @@ bool AppConfig::load_from_file(const std::filesystem::path& config_path, std::st
             continue;
         }
 
+        if (full_key == "capture.wfp_redirect_enabled") {
+            if (!parse_bool(value, wfp_redirect_enabled)) {
+                error_message = "invalid capture.wfp_redirect_enabled at line " + std::to_string(line_number);
+                return false;
+            }
+            continue;
+        }
+
+        if (full_key == "capture.wfp_redirect_allow_startup_fallback") {
+            if (!parse_bool(value, wfp_redirect_allow_startup_fallback)) {
+                error_message = "invalid capture.wfp_redirect_allow_startup_fallback at line " + std::to_string(line_number);
+                return false;
+            }
+            continue;
+        }
+
+        if (full_key == "capture.wfp_redirect_allow_runtime_fallback") {
+            if (!parse_bool(value, wfp_redirect_allow_runtime_fallback)) {
+                error_message = "invalid capture.wfp_redirect_allow_runtime_fallback at line " + std::to_string(line_number);
+                return false;
+            }
+            continue;
+        }
+
+        if (full_key == "capture.wfp_callout_channel") {
+            wfp_callout_channel = value;
+            continue;
+        }
+
+        if (full_key == "capture.wfp_redirect_filter") {
+            wfp_redirect_filter = value;
+            continue;
+        }
+
         if (full_key == "capture.windivert_filter") {
             windivert_filter = value;
             continue;
